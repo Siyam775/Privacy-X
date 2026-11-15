@@ -1,0 +1,535 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public-facing user profile (PII-free; email isolated in private subcollection).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "username": { "type": "string", "description": "Unique lowercase handle" },
+        "displayName": { "type": "string", "description": "Display name" },
+        "photoUrl": { "type": "string", "description": "Avatar image URL" },
+        "bio": { "type": "string", "description": "Profile bio" },
+        "statusText": { "type": "string", "description": "Current user status" },
+        "isOnline": { "type": "boolean", "description": "Presence online flag" },
+        "lastSeen": { "type": "string", "format": "date-time", "description": "Server timestamp of last activity" },
+        "isSuspended": { "type": "boolean", "description": "Admin moderation flag" },
+        "profileVisibility": { "type": "string", "enum": ["everyone", "followers", "private"] },
+        "lastSeenPrivacy": { "type": "string", "enum": ["everyone", "followers", "nobody"] },
+        "storyPrivacy": { "type": "string", "enum": ["public", "followers", "close_friends"] },
+        "customAccentHex": { "type": "string", "description": "Custom profile accent color hex" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "displayName", "isSuspended", "profileVisibility", "createdAt", "updatedAt"]
+    },
+    "UserPrivateAccount": {
+      "title": "UserPrivateAccount",
+      "description": "Isolated PII and private user metadata.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "closeFriendsIds": { "type": "string", "description": "List of UIDs" },
+        "hiddenStoryUserIds": { "type": "string", "description": "List of UIDs" },
+        "savedPostIds": { "type": "string", "description": "List of post IDs" },
+        "fcmToken": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "updatedAt"]
+    },
+    "UsernameReservation": {
+      "title": "UsernameReservation",
+      "description": "Atomic unique username registry.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["username", "userId", "displayName", "createdAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Persisted theme, notification, privacy, and media preferences.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "themeId": { "type": "string", "enum": ["material_liquid_glass", "pure_ios_glass", "classic_bw"] },
+        "appearanceMode": { "type": "string", "enum": ["system", "light", "dark"] },
+        "accentColorHex": { "type": "string" },
+        "reducedMotion": { "type": "boolean" },
+        "notificationsEnabled": { "type": "boolean" },
+        "quietHoursEnabled": { "type": "boolean" },
+        "soundEnabled": { "type": "boolean" },
+        "vibrationEnabled": { "type": "boolean" },
+        "showNotificationPreview": { "type": "boolean" },
+        "autoDownloadWifi": { "type": "boolean" },
+        "autoDownloadCellular": { "type": "boolean" },
+        "aiConsentGranted": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "themeId", "appearanceMode", "updatedAt"]
+    },
+    "UserSession": {
+      "title": "UserSession",
+      "description": "Active session and login activity record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "deviceName": { "type": "string" },
+        "platform": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "lastActiveAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "deviceName", "platform", "isActive", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "1:1 direct chat, group, community, or channel.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["direct", "group", "community", "channel"] },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "memberUids": { "type": "string", "description": "Bounded list of member UIDs" },
+        "adminUids": { "type": "string", "description": "Bounded list of admin UIDs" },
+        "communityId": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "slowModeSeconds": { "type": "integer" },
+        "memberApprovalRequired": { "type": "boolean" },
+        "adminsOnlyMessaging": { "type": "boolean" },
+        "inviteCode": { "type": "string" },
+        "lastMessageText": { "type": "string" },
+        "lastMessageSenderId": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "pinnedMessageId": { "type": "string" },
+        "pinnedMessageText": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "title", "ownerId", "isPublic", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Real-time message with media, reply, reactions, polls, and disappearing support.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderAvatarUrl": { "type": "string" },
+        "memberUids": { "type": "string", "description": "Denormalized for fast rule evaluation" },
+        "isPublic": { "type": "boolean" },
+        "text": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["text", "image", "video", "voice", "document", "poll", "sticker"] },
+        "fileName": { "type": "string" },
+        "fileSizeBytes": { "type": "integer" },
+        "mimeType": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "replyToId": { "type": "string" },
+        "replyToPreview": { "type": "string" },
+        "forwardedFrom": { "type": "string" },
+        "topicId": { "type": "string" },
+        "isPinned": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "pollQuestion": { "type": "string" },
+        "pollOptions": { "type": "string" },
+        "pollVotes": { "type": "object" },
+        "reactions": { "type": "object" },
+        "readBy": { "type": "string" },
+        "deliveredTo": { "type": "string" },
+        "disappearsAt": { "type": "string", "format": "date-time" },
+        "scheduledFor": { "type": "string", "format": "date-time" },
+        "reminderAt": { "type": "string", "format": "date-time" },
+        "editedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "senderId", "senderName", "mediaType", "isPublic", "createdAt", "updatedAt"]
+    },
+    "ConversationMember": {
+      "title": "ConversationMember",
+      "description": "Per-user conversation preferences, folder, mute, archive, and draft state.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "memberUids": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "admin", "member", "subscriber"] },
+        "isMuted": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "markedUnread": { "type": "boolean" },
+        "unreadCount": { "type": "integer" },
+        "folder": { "type": "string" },
+        "draftText": { "type": "string" },
+        "customTheme": { "type": "string" },
+        "customWallpaper": { "type": "string" },
+        "typingAt": { "type": "string", "format": "date-time" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "conversationId", "role", "isMuted", "isArchived", "updatedAt"]
+    },
+    "GroupTopic": {
+      "title": "GroupTopic",
+      "description": "Organized discussion topic inside a group or community.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "title": { "type": "string" },
+        "iconEmoji": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "memberUids": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "title", "createdBy", "createdAt"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "24-hour story with privacy controls, highlights, and archive.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatarUrl": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["text", "image", "video"] },
+        "caption": { "type": "string" },
+        "backgroundGradient": { "type": "string" },
+        "privacy": { "type": "string", "enum": ["public", "followers", "close_friends", "custom"] },
+        "allowedUids": { "type": "string" },
+        "hiddenUids": { "type": "string" },
+        "isArchived": { "type": "boolean" },
+        "highlightTitle": { "type": "string" },
+        "viewCount": { "type": "integer" },
+        "reactions": { "type": "object" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "mediaType", "privacy", "isArchived", "createdAt", "updatedAt"]
+    },
+    "StoryView": {
+      "title": "StoryView",
+      "description": "Tracks who viewed a story.",
+      "type": "object",
+      "properties": {
+        "viewerId": { "type": "string" },
+        "viewerName": { "type": "string" },
+        "storyAuthorId": { "type": "string" },
+        "reaction": { "type": "string" },
+        "viewedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["viewerId", "viewerName", "storyAuthorId", "viewedAt"]
+    },
+    "SocialPost": {
+      "title": "SocialPost",
+      "description": "Optional social layer post for media feed and discovery.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatarUrl": { "type": "string" },
+        "caption": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "collectionTag": { "type": "string" },
+        "reactions": { "type": "object" },
+        "commentCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "caption", "createdAt", "updatedAt"]
+    },
+    "PostComment": {
+      "title": "PostComment",
+      "description": "Comment on a social post.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "authorId", "authorName", "text", "createdAt"]
+    },
+    "Follow": {
+      "title": "Follow",
+      "description": "Follower relationship edge.",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string" },
+        "followedId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["followerId", "followedId", "createdAt"]
+    },
+    "CallSession": {
+      "title": "CallSession",
+      "description": "WebRTC voice/video call signaling and call history.",
+      "type": "object",
+      "properties": {
+        "callerId": { "type": "string" },
+        "callerName": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "participantIds": { "type": "string" },
+        "callType": { "type": "string", "enum": ["voice", "video"] },
+        "status": { "type": "string", "enum": ["ringing", "active", "ended", "rejected", "missed"] },
+        "offerSdp": { "type": "string" },
+        "answerSdp": { "type": "string" },
+        "durationSeconds": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["callerId", "callerName", "callType", "status", "createdAt", "updatedAt"]
+    },
+    "IceCandidateDoc": {
+      "title": "IceCandidateDoc",
+      "description": "WebRTC ICE candidate for signaling.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "participantIds": { "type": "string" },
+        "sdpMid": { "type": "string" },
+        "sdpMLineIndex": { "type": "integer" },
+        "candidate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "candidate", "createdAt"]
+    },
+    "SavedMessage": {
+      "title": "SavedMessage",
+      "description": "User-bookmarked or saved message.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "content": { "type": "string" },
+        "sourceConversationId": { "type": "string" },
+        "sourceSenderName": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "content", "createdAt"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "User notification record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "type": { "type": "string", "enum": ["message", "call", "missed_call", "story_reply", "reaction", "mention", "group_update", "announcement"] },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "targetId": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "senderId", "type", "title", "body", "isRead", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Abuse or moderation report.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["user", "message", "group", "community", "channel", "story", "post"] },
+        "targetId": { "type": "string" },
+        "reason": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "reviewed", "resolved", "dismissed"] },
+        "reviewedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetType", "targetId", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "Block": {
+      "title": "Block",
+      "description": "User block edge.",
+      "type": "object",
+      "properties": {
+        "blockerId": { "type": "string" },
+        "blockedId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["blockerId", "blockedId", "createdAt"]
+    },
+    "PlatformAnnouncement": {
+      "title": "PlatformAnnouncement",
+      "description": "Super Admin platform-wide announcement.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "priority": { "type": "string", "enum": ["normal", "high", "urgent"] },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "body", "priority", "createdBy", "createdAt"]
+    },
+    "AdminLog": {
+      "title": "AdminLog",
+      "description": "Immutable Super Admin security audit log.",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "action": { "type": "string" },
+        "targetId": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorId", "action", "targetId", "details", "createdAt"]
+    },
+    "PlatformSettings": {
+      "title": "PlatformSettings",
+      "description": "Super Admin global platform controls.",
+      "type": "object",
+      "properties": {
+        "maxUploadMb": { "type": "integer" },
+        "allowNewRegistrations": { "type": "boolean" },
+        "maintenanceMode": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["maxUploadMb", "allowNewRegistrations", "maintenanceMode", "updatedBy", "updatedAt"]
+    },
+    "AiConversation": {
+      "title": "AiConversation",
+      "description": "User AI assistant conversation metadata.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "lastPrompt": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "createdAt", "updatedAt"]
+    },
+    "AiMessage": {
+      "title": "AiMessage",
+      "description": "Turn in an AI assistant conversation.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "role", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public user profiles"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateAccount" },
+      "description": "Private PII and user-only metadata"
+    },
+    "/users/{userId}/userSettings/{docId}": {
+      "schema": { "$ref": "#/entities/UserSettings" },
+      "description": "Persisted user preferences"
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/UserSession" },
+      "description": "Active user sessions"
+    },
+    "/users/{userId}/savedMessages/{itemId}": {
+      "schema": { "$ref": "#/entities/SavedMessage" },
+      "description": "Personal saved messages"
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "User notifications"
+    },
+    "/users/{userId}/aiConversations/{sessionId}": {
+      "schema": { "$ref": "#/entities/AiConversation" },
+      "description": "AI assistant sessions"
+    },
+    "/users/{userId}/aiConversations/{sessionId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/AiMessage" },
+      "description": "AI assistant messages"
+    },
+    "/usernames/{username}": {
+      "schema": { "$ref": "#/entities/UsernameReservation" },
+      "description": "Unique username lookup"
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Direct chats, groups, communities, and channels"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages inside a conversation"
+    },
+    "/conversations/{conversationId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/ConversationMember" },
+      "description": "Per-member conversation settings and state"
+    },
+    "/conversations/{conversationId}/topics/{topicId}": {
+      "schema": { "$ref": "#/entities/GroupTopic" },
+      "description": "Discussion topics inside groups"
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/Story" },
+      "description": "24h stories and highlights"
+    },
+    "/stories/{storyId}/views/{viewerId}": {
+      "schema": { "$ref": "#/entities/StoryView" },
+      "description": "Story view receipts"
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/SocialPost" },
+      "description": "Optional social layer posts"
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/PostComment" },
+      "description": "Comments on social posts"
+    },
+    "/follows/{followId}": {
+      "schema": { "$ref": "#/entities/Follow" },
+      "description": "Follower/following graph"
+    },
+    "/calls/{callId}": {
+      "schema": { "$ref": "#/entities/CallSession" },
+      "description": "WebRTC signaling sessions"
+    },
+    "/calls/{callId}/candidates/{candidateId}": {
+      "schema": { "$ref": "#/entities/IceCandidateDoc" },
+      "description": "WebRTC ICE candidates"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/Report" },
+      "description": "Abuse and moderation reports"
+    },
+    "/blocks/{blockId}": {
+      "schema": { "$ref": "#/entities/Block" },
+      "description": "Blocked users"
+    },
+    "/platformAnnouncements/{announcementId}": {
+      "schema": { "$ref": "#/entities/PlatformAnnouncement" },
+      "description": "Super Admin platform announcements"
+    },
+    "/adminLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AdminLog" },
+      "description": "Super Admin audit logs"
+    },
+    "/platformSettings/{docId}": {
+      "schema": { "$ref": "#/entities/PlatformSettings" },
+      "description": "Super Admin platform settings"
+    }
+  }
+}

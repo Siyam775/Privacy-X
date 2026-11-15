@@ -1,0 +1,6 @@
+{
+  "name": "PrivacyX",
+  "description": "Next-generation premium messaging and social platform with three adaptive themes, radial floating action menu, real-time Firestore chat, media sharing, WebRTC calling, AI assistant, and Super Admin governance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "891277106805",
+    "firebase_url": "https://privacy-x-default-rtdb.firebaseio.com",
+    "project_id": "privacy-x",
+    "storage_bucket": "privacy-x.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:891277106805:android:8b97613c0d8d85fb32a23c",
+        "android_client_info": {
+          "package_name": "com.privacy.x"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "891277106805-6g1se2iav1a4oeuuen7mki13t4scafmi.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCLmUK0dvsXGCHK6-8YroGGSQm4-S9an_I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "891277106805-6g1se2iav1a4oeuuen7mki13t4scafmi.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

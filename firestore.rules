@@ -1,0 +1,735 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Core Security Primitives & Super Admin Lock
+    // ---------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Strictly locked to the single manually provisioned Super Admin UID
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.uid == '2bL4lJTTt9WMILpCclHeKNYOdz62';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUsername(username) {
+      return username is string && username.size() >= 3 && username.size() <= 30 && username.matches('^[a-z0-9_]+$');
+    }
+
+    function isValidTs(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isOptString(data, field, maxLen) {
+      return !(field in data) || data[field] == null || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptBool(data, field) {
+      return !(field in data) || data[field] == null || data[field] is bool;
+    }
+
+    function isOptInt(data, field) {
+      return !(field in data) || data[field] == null || data[field] is int;
+    }
+
+    function isBoundedStringList(data, field, maxItems) {
+      return !(field in data) || (
+        data[field] is list &&
+        data[field].size() <= maxItems &&
+        (data[field].size() == 0 || data[field][0] is string)
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Validation Helpers (Anti-Update-Gap)
+    // ---------------------------------------------------------
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             isValidUsername(data.username) &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             isOptString(data, 'photoUrl', 1000) &&
+             isOptString(data, 'bio', 300) &&
+             isOptString(data, 'statusText', 100) &&
+             isOptBool(data, 'isOnline') &&
+             data.isSuspended is bool &&
+             data.profileVisibility in ['everyone', 'followers', 'private'] &&
+             (!('lastSeenPrivacy' in data) || data.lastSeenPrivacy in ['everyone', 'followers', 'nobody']) &&
+             (!('storyPrivacy' in data) || data.storyPrivacy in ['public', 'followers', 'close_friends']) &&
+             isOptString(data, 'customAccentHex', 16) &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidPrivateAccount(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             isOptString(data, 'email', 256) &&
+             isBoundedStringList(data, 'closeFriendsIds', 200) &&
+             isBoundedStringList(data, 'hiddenStoryUserIds', 200) &&
+             isBoundedStringList(data, 'savedPostIds', 500) &&
+             isOptString(data, 'fcmToken', 512) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidUsernameDoc(data) {
+      return isValidUsername(data.username) &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             isOptString(data, 'photoUrl', 1000) &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidUserSettings(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.themeId in ['material_liquid_glass', 'pure_ios_glass', 'classic_bw'] &&
+             data.appearanceMode in ['system', 'light', 'dark'] &&
+             isOptString(data, 'accentColorHex', 16) &&
+             isOptBool(data, 'reducedMotion') &&
+             isOptBool(data, 'notificationsEnabled') &&
+             isOptBool(data, 'quietHoursEnabled') &&
+             isOptBool(data, 'soundEnabled') &&
+             isOptBool(data, 'vibrationEnabled') &&
+             isOptBool(data, 'showNotificationPreview') &&
+             isOptBool(data, 'autoDownloadWifi') &&
+             isOptBool(data, 'autoDownloadCellular') &&
+             isOptBool(data, 'aiConsentGranted') &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidSession(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 100 &&
+             data.platform is string && data.platform.size() >= 1 && data.platform.size() <= 40 &&
+             data.isActive is bool &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidSavedMessage(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.content is string && data.content.size() <= 5000 &&
+             isOptString(data, 'sourceConversationId', 128) &&
+             isOptString(data, 'sourceSenderName', 80) &&
+             isOptString(data, 'mediaUrl', 1000) &&
+             isOptString(data, 'mediaType', 32) &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidNotification(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.senderId is string && data.senderId.size() <= 128 &&
+             data.type in ['message', 'call', 'missed_call', 'story_reply', 'reaction', 'mention', 'group_update', 'announcement'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 500 &&
+             isOptString(data, 'targetId', 128) &&
+             data.isRead is bool &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidAiConversation(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             isOptString(data, 'lastPrompt', 500) &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidAiMessage(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.role in ['user', 'model'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 20000 &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidConversation(data) {
+      return data.type in ['direct', 'group', 'community', 'channel'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             isOptString(data, 'description', 500) &&
+             isOptString(data, 'photoUrl', 1000) &&
+             data.ownerId is string && data.ownerId.size() <= 128 &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 100 &&
+             data.adminUids is list && data.adminUids.size() >= 1 && data.adminUids.size() <= 30 &&
+             isOptString(data, 'communityId', 128) &&
+             data.isPublic is bool &&
+             isOptInt(data, 'slowModeSeconds') &&
+             isOptBool(data, 'memberApprovalRequired') &&
+             isOptBool(data, 'adminsOnlyMessaging') &&
+             isOptString(data, 'inviteCode', 64) &&
+             isOptString(data, 'lastMessageText', 500) &&
+             isOptString(data, 'lastMessageSenderId', 128) &&
+             isOptString(data, 'pinnedMessageId', 128) &&
+             isOptString(data, 'pinnedMessageText', 500) &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidMessage(data) {
+      return data.conversationId is string && data.conversationId.size() <= 128 &&
+             data.senderId is string && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
+             isOptString(data, 'senderAvatarUrl', 1000) &&
+             data.memberUids is list && data.memberUids.size() <= 100 &&
+             data.isPublic is bool &&
+             isOptString(data, 'text', 8000) &&
+             isOptString(data, 'mediaUrl', 1000) &&
+             data.mediaType in ['text', 'image', 'video', 'voice', 'document', 'poll', 'sticker'] &&
+             isOptString(data, 'fileName', 256) &&
+             isOptInt(data, 'fileSizeBytes') &&
+             isOptString(data, 'mimeType', 128) &&
+             isOptInt(data, 'durationMs') &&
+             isOptString(data, 'replyToId', 128) &&
+             isOptString(data, 'replyToPreview', 300) &&
+             isOptString(data, 'forwardedFrom', 120) &&
+             isOptString(data, 'topicId', 128) &&
+             isOptBool(data, 'isPinned') &&
+             isOptBool(data, 'isDeleted') &&
+             isOptString(data, 'pollQuestion', 300) &&
+             isBoundedStringList(data, 'pollOptions', 10) &&
+             (!('pollVotes' in data) || data.pollVotes is map) &&
+             (!('reactions' in data) || data.reactions is map) &&
+             isBoundedStringList(data, 'readBy', 100) &&
+             isBoundedStringList(data, 'deliveredTo', 100) &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidConversationMember(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.conversationId is string && data.conversationId.size() <= 128 &&
+             data.memberUids is list && data.memberUids.size() <= 100 &&
+             data.role in ['owner', 'admin', 'member', 'subscriber'] &&
+             data.isMuted is bool &&
+             data.isArchived is bool &&
+             isOptBool(data, 'markedUnread') &&
+             isOptInt(data, 'unreadCount') &&
+             isOptString(data, 'folder', 40) &&
+             isOptString(data, 'draftText', 4000) &&
+             isOptString(data, 'customTheme', 64) &&
+             isOptString(data, 'customWallpaper', 1000) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidGroupTopic(data) {
+      return data.conversationId is string && data.conversationId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 80 &&
+             isOptString(data, 'iconEmoji', 16) &&
+             data.createdBy is string && data.createdBy.size() <= 128 &&
+             data.isPublic is bool &&
+             data.memberUids is list && data.memberUids.size() <= 100 &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidStory(data) {
+      return data.authorId is string && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             isOptString(data, 'authorAvatarUrl', 1000) &&
+             isOptString(data, 'mediaUrl', 1000) &&
+             data.mediaType in ['text', 'image', 'video'] &&
+             isOptString(data, 'caption', 500) &&
+             isOptString(data, 'backgroundGradient', 64) &&
+             data.privacy in ['public', 'followers', 'close_friends', 'custom'] &&
+             isBoundedStringList(data, 'allowedUids', 200) &&
+             isBoundedStringList(data, 'hiddenUids', 200) &&
+             data.isArchived is bool &&
+             isOptString(data, 'highlightTitle', 60) &&
+             isOptInt(data, 'viewCount') &&
+             (!('reactions' in data) || data.reactions is map) &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidStoryView(data) {
+      return data.viewerId is string && data.viewerId.size() <= 128 &&
+             data.viewerName is string && data.viewerName.size() >= 1 && data.viewerName.size() <= 80 &&
+             data.storyAuthorId is string && data.storyAuthorId.size() <= 128 &&
+             isOptString(data, 'reaction', 16) &&
+             isValidTs(data.viewedAt);
+    }
+
+    function isValidPost(data) {
+      return data.authorId is string && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             isOptString(data, 'authorAvatarUrl', 1000) &&
+             data.caption is string && data.caption.size() <= 2000 &&
+             isOptString(data, 'mediaUrl', 1000) &&
+             isOptString(data, 'collectionTag', 60) &&
+             (!('reactions' in data) || data.reactions is map) &&
+             isOptInt(data, 'commentCount') &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidPostComment(data) {
+      return data.postId is string && data.postId.size() <= 128 &&
+             data.authorId is string && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidFollow(data) {
+      return data.followerId is string && data.followerId.size() <= 128 &&
+             data.followedId is string && data.followedId.size() <= 128 &&
+             data.followerId != data.followedId &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidCall(data) {
+      return data.callerId is string && data.callerId.size() <= 128 &&
+             data.callerName is string && data.callerName.size() >= 1 && data.callerName.size() <= 80 &&
+             isOptString(data, 'conversationId', 128) &&
+             data.participantIds is list && data.participantIds.size() >= 1 && data.participantIds.size() <= 16 &&
+             data.callType in ['voice', 'video'] &&
+             data.status in ['ringing', 'active', 'ended', 'rejected', 'missed'] &&
+             isOptString(data, 'offerSdp', 32000) &&
+             isOptString(data, 'answerSdp', 32000) &&
+             isOptInt(data, 'durationSeconds') &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidCandidate(data) {
+      return data.senderId is string && data.senderId.size() <= 128 &&
+             data.participantIds is list && data.participantIds.size() <= 16 &&
+             isOptString(data, 'sdpMid', 64) &&
+             isOptInt(data, 'sdpMLineIndex') &&
+             data.candidate is string && data.candidate.size() >= 1 && data.candidate.size() <= 4000 &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidReport(data) {
+      return data.reporterId is string && data.reporterId.size() <= 128 &&
+             data.targetType in ['user', 'message', 'group', 'community', 'channel', 'story', 'post'] &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 120 &&
+             isOptString(data, 'details', 1000) &&
+             data.status in ['open', 'reviewed', 'resolved', 'dismissed'] &&
+             isOptString(data, 'reviewedBy', 128) &&
+             isValidTs(data.createdAt) &&
+             isValidTs(data.updatedAt);
+    }
+
+    function isValidBlock(data) {
+      return data.blockerId is string && data.blockerId.size() <= 128 &&
+             data.blockedId is string && data.blockedId.size() <= 128 &&
+             data.blockerId != data.blockedId &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidAnnouncement(data) {
+      return data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 2000 &&
+             data.priority in ['normal', 'high', 'urgent'] &&
+             data.createdBy is string && data.createdBy.size() <= 128 &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidAdminLog(data) {
+      return data.actorId is string && data.actorId.size() <= 128 &&
+             data.action is string && data.action.size() >= 1 && data.action.size() <= 80 &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.details is string && data.details.size() <= 1000 &&
+             isValidTs(data.createdAt);
+    }
+
+    function isValidPlatformSettings(data) {
+      return data.maxUploadMb is int && data.maxUploadMb >= 1 && data.maxUploadMb <= 100 &&
+             data.allowNewRegistrations is bool &&
+             data.maintenanceMode is bool &&
+             data.updatedBy is string && data.updatedBy.size() <= 128 &&
+             isValidTs(data.updatedAt);
+    }
+
+    // ---------------------------------------------------------
+    // 1. Users & Isolated PII / Private Subcollections
+    // ---------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (
+        resource == null || isOwner(userId) || isSuperAdmin() || existing().profileVisibility != 'private'
+      );
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        existing().userId == request.auth.uid ||
+        existing().profileVisibility == 'everyone'
+      );
+
+      allow create: if isOwner(userId) && isValidId(userId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().isSuspended == false &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isSignedIn() && isValidId(userId) && isValidUserProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isSuperAdmin() ||
+                         (
+                           isOwner(userId) &&
+                           incoming().isSuspended == existing().isSuspended &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'username', 'displayName', 'photoUrl', 'bio', 'statusText',
+                             'isOnline', 'lastSeen', 'profileVisibility', 'lastSeenPrivacy',
+                             'storyPrivacy', 'customAccentHex', 'updatedAt'
+                           ])
+                         )
+                       );
+
+      allow delete: if isOwner(userId) || isSuperAdmin();
+
+      match /private/{docId} {
+        allow get, list, delete: if isOwner(userId) || isSuperAdmin();
+        allow create, update: if (isOwner(userId) || isSuperAdmin()) &&
+                                 isValidId(docId) &&
+                                 incoming().userId == userId &&
+                                 isValidPrivateAccount(incoming());
+      }
+
+      match /userSettings/{docId} {
+        allow get, list, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(docId) &&
+                                 incoming().userId == userId &&
+                                 isValidUserSettings(incoming());
+      }
+
+      match /sessions/{sessionId} {
+        allow get, list, delete: if isOwner(userId) || isSuperAdmin();
+        allow create, update: if isOwner(userId) && isValidId(sessionId) &&
+                                 incoming().userId == userId &&
+                                 isValidSession(incoming());
+      }
+
+      match /savedMessages/{itemId} {
+        allow get, list, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(itemId) &&
+                                 incoming().userId == userId &&
+                                 isValidSavedMessage(incoming());
+      }
+
+      match /notifications/{notificationId} {
+        allow get, list, delete: if isOwner(userId);
+        allow create: if isSignedIn() && isValidId(notificationId) &&
+                         incoming().userId == userId &&
+                         incoming().senderId == request.auth.uid &&
+                         isValidNotification(incoming());
+        allow update: if isOwner(userId) && isValidId(notificationId) &&
+                         isValidNotification(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt']);
+      }
+
+      match /aiConversations/{sessionId} {
+        allow get, list, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(sessionId) &&
+                                 incoming().userId == userId &&
+                                 isValidAiConversation(incoming());
+
+        match /messages/{messageId} {
+          allow get, list, delete: if isOwner(userId);
+          allow create, update: if isOwner(userId) && isValidId(messageId) &&
+                                   incoming().userId == userId &&
+                                   isValidAiMessage(incoming());
+        }
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 2. Unique Usernames
+    // ---------------------------------------------------------
+    match /usernames/{username} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidUsername(username) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().username == username &&
+                       !exists(/databases/$(database)/documents/usernames/$(username)) &&
+                       isValidUsernameDoc(incoming());
+      allow update: if isSignedIn() && isValidUsername(username) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().username == existing().username &&
+                       isValidUsernameDoc(incoming());
+      allow delete: if isSignedIn() && (existing().userId == request.auth.uid || isSuperAdmin());
+    }
+
+    // ---------------------------------------------------------
+    // 3. Conversations, Groups, Communities & Channels
+    // ---------------------------------------------------------
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && (
+        resource == null || isSuperAdmin() || existing().isPublic == true || request.auth.uid in existing().memberUids
+      );
+      allow list: if isSignedIn() && (
+        isSuperAdmin() || existing().isPublic == true || request.auth.uid in existing().memberUids
+      );
+      allow create: if isSignedIn() && isValidId(conversationId) &&
+                       isValidConversation(incoming()) &&
+                       incoming().ownerId == request.auth.uid &&
+                       request.auth.uid in incoming().memberUids &&
+                       request.auth.uid in incoming().adminUids;
+      allow update: if isSignedIn() && isValidId(conversationId) &&
+                       isValidConversation(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isSuperAdmin() ||
+                         (request.auth.uid in existing().adminUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'title', 'description', 'photoUrl', 'memberUids', 'adminUids',
+                            'isPublic', 'slowModeSeconds', 'memberApprovalRequired', 'adminsOnlyMessaging', 'inviteCode',
+                            'lastMessageText', 'lastMessageAt', 'lastMessageSenderId',
+                            'pinnedMessageId', 'pinnedMessageText', 'updatedAt'
+                          ])) ||
+                         (request.auth.uid in existing().memberUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'lastMessageText', 'lastMessageAt', 'lastMessageSenderId', 'updatedAt'
+                          ])) ||
+                         (existing().isPublic == true &&
+                          existing().memberApprovalRequired != true &&
+                          incoming().memberUids.hasAll(existing().memberUids) &&
+                          incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+                          request.auth.uid in incoming().memberUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])) ||
+                         (request.auth.uid in existing().memberUids &&
+                          !(request.auth.uid in incoming().memberUids) &&
+                          existing().memberUids.hasAll(incoming().memberUids) &&
+                          incoming().memberUids.size() == existing().memberUids.size() - 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+                       );
+      allow delete: if isSignedIn() && isValidId(conversationId) && (
+        isSuperAdmin() || existing().ownerId == request.auth.uid
+      );
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(messageId) && (
+          isSuperAdmin() || existing().isPublic == true || request.auth.uid in existing().memberUids
+        );
+        allow list: if isSignedIn() && (
+          isSuperAdmin() || existing().isPublic == true || request.auth.uid in existing().memberUids
+        );
+        allow create: if isSignedIn() && isValidId(messageId) &&
+                         isValidMessage(incoming()) &&
+                         incoming().conversationId == conversationId &&
+                         incoming().senderId == request.auth.uid &&
+                         exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
+                         (
+                           (get(/databases/$(database)/documents/conversations/$(conversationId)).data.type == 'channel' &&
+                            request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.adminUids) ||
+                           (get(/databases/$(database)/documents/conversations/$(conversationId)).data.type != 'channel' &&
+                            request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberUids &&
+                            (get(/databases/$(database)/documents/conversations/$(conversationId)).data.adminsOnlyMessaging != true ||
+                             request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.adminUids))
+                         );
+        allow update: if isSignedIn() && isValidId(messageId) &&
+                         isValidMessage(incoming()) &&
+                         incoming().conversationId == existing().conversationId &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().createdAt == existing().createdAt && (
+                           isSuperAdmin() ||
+                           (existing().senderId == request.auth.uid &&
+                            incoming().diff(existing()).affectedKeys().hasOnly([
+                              'text', 'editedAt', 'isDeleted', 'isPinned', 'reactions',
+                              'readBy', 'deliveredTo', 'pollVotes', 'updatedAt'
+                            ])) ||
+                           ((request.auth.uid in existing().memberUids || existing().isPublic == true) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly([
+                              'reactions', 'readBy', 'deliveredTo', 'pollVotes', 'isPinned', 'updatedAt'
+                            ]))
+                         );
+        allow delete: if isSignedIn() && isValidId(messageId) && (
+          isSuperAdmin() || existing().senderId == request.auth.uid
+        );
+      }
+
+      match /members/{memberId} {
+        allow get, list: if isSignedIn() && (
+          isSuperAdmin() || existing().userId == request.auth.uid || request.auth.uid in existing().memberUids
+        );
+        allow create, update: if isSignedIn() && isValidId(memberId) &&
+                                 isValidConversationMember(incoming()) &&
+                                 incoming().conversationId == conversationId && (
+                                   isSuperAdmin() ||
+                                   memberId == request.auth.uid ||
+                                   request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.adminUids
+                                 );
+        allow delete: if isSignedIn() && (isSuperAdmin() || memberId == request.auth.uid);
+      }
+
+      match /topics/{topicId} {
+        allow get, list: if isSignedIn() && (
+          isSuperAdmin() || existing().isPublic == true || request.auth.uid in existing().memberUids
+        );
+        allow create: if isSignedIn() && isValidId(topicId) &&
+                         isValidGroupTopic(incoming()) &&
+                         incoming().conversationId == conversationId &&
+                         incoming().createdBy == request.auth.uid &&
+                         request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberUids;
+        allow delete: if isSignedIn() && (
+          isSuperAdmin() || existing().createdBy == request.auth.uid
+        );
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 4. Stories & Social Layer
+    // ---------------------------------------------------------
+    match /stories/{storyId} {
+      allow get, list: if isSignedIn() && (
+        isSuperAdmin() ||
+        existing().authorId == request.auth.uid ||
+        existing().privacy == 'public' ||
+        existing().privacy == 'followers' ||
+        request.auth.uid in existing().allowedUids
+      );
+      allow create: if isSignedIn() && isValidId(storyId) &&
+                       isValidStory(incoming()) &&
+                       incoming().authorId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(storyId) &&
+                       isValidStory(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isSuperAdmin() ||
+                         (existing().authorId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'isArchived', 'highlightTitle', 'caption', 'privacy', 'allowedUids', 'hiddenUids', 'updatedAt'
+                          ])) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['viewCount', 'reactions', 'updatedAt'])
+                       );
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().authorId == request.auth.uid);
+
+      match /views/{viewerId} {
+        allow get, list: if isSignedIn() && (
+          isSuperAdmin() || viewerId == request.auth.uid || existing().storyAuthorId == request.auth.uid
+        );
+        allow create, update: if isSignedIn() && viewerId == request.auth.uid && isValidStoryView(incoming());
+      }
+    }
+
+    match /posts/{postId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(postId) &&
+                       isValidPost(incoming()) &&
+                       incoming().authorId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(postId) &&
+                       isValidPost(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isSuperAdmin() ||
+                         (existing().authorId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'collectionTag', 'reactions', 'commentCount', 'updatedAt'])) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'commentCount', 'updatedAt'])
+                       );
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().authorId == request.auth.uid);
+
+      match /comments/{commentId} {
+        allow get, list: if isSignedIn();
+        allow create: if isSignedIn() && isValidId(commentId) &&
+                         isValidPostComment(incoming()) &&
+                         incoming().postId == postId &&
+                         incoming().authorId == request.auth.uid;
+        allow delete: if isSignedIn() && (isSuperAdmin() || existing().authorId == request.auth.uid);
+      }
+    }
+
+    match /follows/{followId} {
+      allow get, list: if isSignedIn() && (
+        isSuperAdmin() || existing().followerId == request.auth.uid || existing().followedId == request.auth.uid
+      );
+      allow create: if isSignedIn() && isValidId(followId) &&
+                       isValidFollow(incoming()) &&
+                       incoming().followerId == request.auth.uid;
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().followerId == request.auth.uid);
+    }
+
+    // ---------------------------------------------------------
+    // 5. WebRTC Calls & Signaling
+    // ---------------------------------------------------------
+    match /calls/{callId} {
+      allow get, list: if isSignedIn() && (
+        isSuperAdmin() || request.auth.uid in existing().participantIds
+      );
+      allow create: if isSignedIn() && isValidId(callId) &&
+                       isValidCall(incoming()) &&
+                       incoming().callerId == request.auth.uid &&
+                       request.auth.uid in incoming().participantIds;
+      allow update: if isSignedIn() && isValidId(callId) &&
+                       isValidCall(incoming()) &&
+                       incoming().callerId == existing().callerId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isSuperAdmin() || request.auth.uid in existing().participantIds
+                       );
+      allow delete: if isSuperAdmin();
+
+      match /candidates/{candidateId} {
+        allow get, list: if isSignedIn() && (
+          isSuperAdmin() || request.auth.uid in existing().participantIds
+        );
+        allow create: if isSignedIn() && isValidId(candidateId) &&
+                         isValidCandidate(incoming()) &&
+                         incoming().senderId == request.auth.uid;
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 6. Moderation, Blocks & Super Admin Governance
+    // ---------------------------------------------------------
+    match /reports/{reportId} {
+      allow get, list: if isSignedIn() && (
+        isSuperAdmin() || existing().reporterId == request.auth.uid
+      );
+      allow create: if isSignedIn() && isValidId(reportId) &&
+                       isValidReport(incoming()) &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'open';
+      allow update: if isSuperAdmin() && isValidId(reportId) &&
+                       isValidReport(incoming()) &&
+                       incoming().reporterId == existing().reporterId &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isSuperAdmin();
+    }
+
+    match /blocks/{blockId} {
+      allow get, list: if isSignedIn() && (
+        isSuperAdmin() || existing().blockerId == request.auth.uid
+      );
+      allow create: if isSignedIn() && isValidId(blockId) &&
+                       isValidBlock(incoming()) &&
+                       incoming().blockerId == request.auth.uid;
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().blockerId == request.auth.uid);
+    }
+
+    match /platformAnnouncements/{announcementId} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isSuperAdmin() && isValidId(announcementId) && isValidAnnouncement(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    match /adminLogs/{logId} {
+      allow get, list: if isSuperAdmin();
+      allow create: if isSuperAdmin() && isValidId(logId) && isValidAdminLog(incoming());
+      allow update, delete: if false;
+    }
+
+    match /platformSettings/{docId} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isSuperAdmin() && isValidId(docId) && isValidPlatformSettings(incoming());
+      allow delete: if false;
+    }
+  }
+}
