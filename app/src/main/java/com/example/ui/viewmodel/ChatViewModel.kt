@@ -1,12 +1,20 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.backup.GoogleDriveBackupManager
 import com.example.core.AppConstants
 import com.example.core.ChatAppearancePreferences
 import com.example.core.ThemePreferencesStore
+import com.example.data.local.LocalMediaEntity
+import com.example.data.local.LocalMediaRepository
+import com.example.data.local.PendingOutgoingMessageEntity
 import com.example.data.model.ChatMessage
 import com.example.data.model.Conversation
 import com.example.data.model.ConversationMember
@@ -15,20 +23,27 @@ import com.example.data.model.UserProfile
 import com.example.data.repository.AiAssistantRepository
 import com.example.data.repository.MessagingRepository
 import com.example.data.repository.SocialRepository
-import com.example.media.CloudinaryMediaService
+import com.example.media.SupabaseMediaService
 import com.example.media.VoicePlaybackState
 import com.example.media.VoiceRecorderPlayer
 import com.example.media.VoiceRecordingState
 import com.google.firebase.Firebase
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Date
+import java.util.UUID
 
 data class UploadUiState(
     val isUploading: Boolean = false,
@@ -49,7 +64,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val socialRepo = SocialRepository(context)
     private val aiRepo = AiAssistantRepository(context)
     private val themeStore = ThemePreferencesStore(context)
-    val mediaService = CloudinaryMediaService(context)
+    val localRepo = LocalMediaRepository(context)
+    private val backupManager = GoogleDriveBackupManager(context)
+    val mediaService = SupabaseMediaService(context)
     val voiceRecorderPlayer = VoiceRecorderPlayer(context)
 
     private val auth = Firebase.auth
@@ -63,8 +80,65 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeConversation = MutableStateFlow<Conversation?>(null)
     val activeConversation: StateFlow<Conversation?> = _activeConversation.asStateFlow()
 
-    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+    private val _remoteMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    private val _cachedMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    private val _pendingOutgoing = localRepo.pendingOutgoingFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val messages: StateFlow<List<ChatMessage>> = combine(
+        _remoteMessages,
+        _cachedMessages,
+        _pendingOutgoing,
+        _activeConversation
+    ) { remote, cached, pending, conv ->
+        val base = if (remote.isNotEmpty()) remote else cached
+        val activeConvId = conv?.id.orEmpty()
+        val remoteIds = base.mapTo(HashSet()) { it.id }
+        val localPendingForChat = pending
+            .filter { it.conversationId == activeConvId && it.clientMessageId !in remoteIds }
+            .map { p ->
+                ChatMessage(
+                    id = p.clientMessageId,
+                    conversationId = p.conversationId,
+                    senderId = p.senderId,
+                    senderName = p.senderName,
+                    senderAvatarUrl = p.senderAvatarUrl,
+                    text = p.text,
+                    mediaType = "text",
+                    replyToId = p.replyToId,
+                    replyToPreview = p.replyToPreview,
+                    topicId = p.topicId,
+                    createdAt = Timestamp(Date(p.createdAtMs)),
+                    updatedAt = Timestamp(Date(p.createdAtMs))
+                )
+            }
+        base + localPendingForChat
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val localMediaMap: StateFlow<Map<String, LocalMediaEntity>> = localRepo.localMediaFlow
+        .map { list ->
+            buildMap {
+                list.forEach { item ->
+                    if (item.mediaId.isNotBlank()) put(item.mediaId, item)
+                    if (item.messageId.isNotBlank()) put(item.messageId, item)
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val pendingMessageIds: StateFlow<Set<String>> = _pendingOutgoing
+        .map { list -> list.mapTo(HashSet()) { it.clientMessageId } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    val knownBackupMediaIds: StateFlow<Set<String>> = backupManager.preferencesFlow
+        .map { it.knownBackupMediaIds }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    private val _isOffline = MutableStateFlow(false)
+    val isOffline: StateFlow<Boolean> = _isOffline.asStateFlow()
+
+    private val _downloadingMessageId = MutableStateFlow<String?>(null)
+    val downloadingMessageId: StateFlow<String?> = _downloadingMessageId.asStateFlow()
 
     private val _myMemberState = MutableStateFlow<ConversationMember?>(null)
     val myMemberState: StateFlow<ConversationMember?> = _myMemberState.asStateFlow()
@@ -106,8 +180,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var detailJobs: Job? = null
     private var uploadJob: Job? = null
     private var slowModeJob: Job? = null
+    private var syncOutboxJob: Job? = null
     private var lastSentByConversation = mutableMapOf<String, Long>()
     private var currentLimit = AppConstants.MESSAGE_PAGE_SIZE
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     init {
         viewModelScope.launch {
@@ -117,21 +193,58 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        viewModelScope.launch {
+            localRepo.markExpiredCloudMedia()
+        }
+        setupNetworkObserver()
+    }
+
+    private fun setupNetworkObserver() {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val currentlyConnected = runCatching {
+            val net = cm.activeNetwork
+            val caps = net?.let { cm.getNetworkCapabilities(it) }
+            caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        }.getOrDefault(true)
+        _isOffline.value = !currentlyConnected
+
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                _isOffline.value = false
+                flushPendingOutbox()
+            }
+
+            override fun onLost(network: Network) {
+                _isOffline.value = true
+            }
+        }
+        networkCallback = cb
+        runCatching { cm.registerDefaultNetworkCallback(cb) }
     }
 
     fun bindConversationLists(uid: String) {
         listJobs?.cancel()
         listJobs = viewModelScope.launch {
             launch {
+                val cached = localRepo.getCachedConversations()
+                if (cached.isNotEmpty() && _myConversations.value.isEmpty()) {
+                    _myConversations.value = cached
+                }
+            }
+            launch {
                 messagingRepo.observeMyConversations(uid)
                     .catch { _chatNotice.value = it.localizedMessage }
-                    .collect { _myConversations.value = it }
+                    .collect { list ->
+                        _myConversations.value = list
+                        localRepo.cacheConversations(list)
+                    }
             }
             launch {
                 messagingRepo.observePublicDiscoveryConversations()
                     .catch {}
                     .collect { _publicConversations.value = it }
             }
+            launch { flushPendingOutbox() }
         }
     }
 
@@ -141,8 +254,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _smartReplies.value = emptyList()
         _aiChatHelperResult.value = null
         _slowModeRemainingSeconds.value = 0L
+        _remoteMessages.value = emptyList()
+        _cachedMessages.value = emptyList()
         detailJobs?.cancel()
         detailJobs = viewModelScope.launch {
+            launch {
+                localRepo.observeCachedMessages(conversationId).collect { cached ->
+                    _cachedMessages.value = cached
+                }
+            }
             launch {
                 themeStore.observeDraft(conversationId).collect { _draftText.value = it }
             }
@@ -165,7 +285,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 flow.catch { _chatNotice.value = it.localizedMessage }
                     .collect { msgs ->
-                        _messages.value = msgs
+                        _remoteMessages.value = msgs
+                        localRepo.cacheMessages(msgs)
+                        localRepo.markExpiredCloudMedia()
                         messagingRepo.markMessagesRead(conversationId, msgs)
                     }
             }
@@ -284,6 +406,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         text: String,
         mediaType: String = "text",
         mediaUrl: String = "",
+        mediaId: String = "",
+        mediaThumbnailUrl: String = "",
+        mediaExpiresAt: Long = 0L,
         fileName: String = "",
         fileSizeBytes: Long = 0L,
         mimeType: String = "",
@@ -301,6 +426,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
+            val clientMsgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(18)}"
+            val replyPreview = replyTo?.let { "${it.senderName}: ${it.text.ifBlank { it.mediaType }}" }?.take(120).orEmpty()
+
+            if (_isOffline.value && mediaType == "text") {
+                localRepo.enqueueOfflineMessage(
+                    PendingOutgoingMessageEntity(
+                        clientMessageId = clientMsgId,
+                        conversationId = conversation.id,
+                        senderId = profile.userId,
+                        senderName = profile.displayName,
+                        senderAvatarUrl = profile.photoUrl,
+                        text = text,
+                        replyToId = replyTo?.id.orEmpty(),
+                        replyToPreview = replyPreview,
+                        topicId = topicId,
+                        disappearsInMinutes = disappearsInMinutes,
+                        scheduledDelayMinutes = scheduledDelayMinutes
+                    )
+                )
+                themeStore.saveDraft(conversation.id, "")
+                _draftText.value = ""
+                _chatNotice.value = "Offline — message queued to sync automatically."
+                return@launch
+            }
+
             val res = messagingRepo.sendMessage(
                 conversation = conversation,
                 senderName = profile.displayName,
@@ -308,17 +458,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 text = text,
                 mediaType = mediaType,
                 mediaUrl = mediaUrl,
+                mediaId = mediaId,
+                mediaThumbnailUrl = mediaThumbnailUrl,
+                mediaExpiresAt = mediaExpiresAt,
+                mediaExpired = false,
                 fileName = fileName,
                 fileSizeBytes = fileSizeBytes,
                 mimeType = mimeType,
                 durationMs = durationMs,
                 replyToId = replyTo?.id.orEmpty(),
-                replyToPreview = replyTo?.let { "${it.senderName}: ${it.text.ifBlank { it.mediaType }}" }?.take(120).orEmpty(),
+                replyToPreview = replyPreview,
                 topicId = topicId,
                 disappearsInMinutes = disappearsInMinutes,
-                scheduledDelayMinutes = scheduledDelayMinutes
+                scheduledDelayMinutes = scheduledDelayMinutes,
+                customMessageId = clientMsgId
             )
             if (res.isSuccess) {
+                val savedMsgId = res.getOrDefault(clientMsgId)
+                if (mediaId.isNotBlank()) {
+                    localRepo.linkMessageId(mediaId, savedMsgId)
+                }
                 lastSentByConversation[conversation.id] = System.currentTimeMillis()
                 refreshSlowModeTimer(conversation, profile.userId)
                 themeStore.saveDraft(conversation.id, "")
@@ -334,7 +493,56 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             } else {
-                _chatNotice.value = res.exceptionOrNull()?.localizedMessage ?: "Send failed"
+                if (mediaType == "text") {
+                    localRepo.enqueueOfflineMessage(
+                        PendingOutgoingMessageEntity(
+                            clientMessageId = clientMsgId,
+                            conversationId = conversation.id,
+                            senderId = profile.userId,
+                            senderName = profile.displayName,
+                            senderAvatarUrl = profile.photoUrl,
+                            text = text,
+                            replyToId = replyTo?.id.orEmpty(),
+                            replyToPreview = replyPreview,
+                            topicId = topicId,
+                            disappearsInMinutes = disappearsInMinutes,
+                            scheduledDelayMinutes = scheduledDelayMinutes
+                        )
+                    )
+                    themeStore.saveDraft(conversation.id, "")
+                    _draftText.value = ""
+                    _chatNotice.value = "Queued offline; will sync automatically when reconnected."
+                } else {
+                    _chatNotice.value = res.exceptionOrNull()?.localizedMessage ?: "Send failed"
+                }
+            }
+        }
+    }
+
+    fun flushPendingOutbox() {
+        if (syncOutboxJob?.isActive == true) return
+        syncOutboxJob = viewModelScope.launch {
+            val queue = localRepo.getPendingOutgoingMessages()
+            if (queue.isEmpty()) return@launch
+            val convMap = _myConversations.value.associateBy { it.id }
+            queue.forEach { pending ->
+                val conv = convMap[pending.conversationId] ?: return@forEach
+                val res = messagingRepo.sendMessage(
+                    conversation = conv,
+                    senderName = pending.senderName,
+                    senderAvatarUrl = pending.senderAvatarUrl,
+                    text = pending.text,
+                    mediaType = "text",
+                    replyToId = pending.replyToId,
+                    replyToPreview = pending.replyToPreview,
+                    topicId = pending.topicId,
+                    disappearsInMinutes = pending.disappearsInMinutes,
+                    scheduledDelayMinutes = pending.scheduledDelayMinutes,
+                    customMessageId = pending.clientMessageId
+                )
+                if (res.isSuccess) {
+                    localRepo.removePendingOutgoing(pending.clientMessageId)
+                }
             }
         }
     }
@@ -385,6 +593,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
             val result = mediaService.uploadMedia(
                 uri = uri,
+                conversationId = conversation.id,
                 compressImage = compressImage,
                 maxUploadMb = maxUploadMb,
                 onProgress = { pct ->
@@ -399,6 +608,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     text = caption,
                     mediaType = uploaded.category,
                     mediaUrl = uploaded.secureUrl,
+                    mediaId = uploaded.mediaId,
+                    mediaThumbnailUrl = uploaded.thumbnailUrl,
+                    mediaExpiresAt = uploaded.expiresAtMs,
                     fileName = uploaded.fileName,
                     fileSizeBytes = uploaded.sizeBytes,
                     mimeType = uploaded.mimeType
@@ -470,7 +682,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 pendingIsVoice = true,
                 pendingDurationMs = durationMs
             )
-            val result = mediaService.uploadMedia(uri, compressImage = false) { pct ->
+            val result = mediaService.uploadMedia(
+                uri = uri,
+                conversationId = conversation.id,
+                compressImage = false,
+                durationMs = durationMs
+            ) { pct ->
                 _uploadState.value = _uploadState.value.copy(progress = pct)
             }
             result.onSuccess { uploaded ->
@@ -481,6 +698,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     text = "",
                     mediaType = "voice",
                     mediaUrl = uploaded.secureUrl,
+                    mediaId = uploaded.mediaId,
+                    mediaThumbnailUrl = uploaded.thumbnailUrl,
+                    mediaExpiresAt = uploaded.expiresAtMs,
                     fileName = uploaded.fileName,
                     fileSizeBytes = uploaded.sizeBytes,
                     mimeType = uploaded.mimeType,
@@ -493,6 +713,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     errorMessage = msg
                 )
                 _chatNotice.value = msg
+            }
+        }
+    }
+
+    fun downloadMessageMedia(message: ChatMessage) {
+        viewModelScope.launch {
+            _downloadingMessageId.value = message.id
+            val res = mediaService.downloadMediaToDevice(message)
+            _downloadingMessageId.value = null
+            res.onSuccess { dl ->
+                _chatNotice.value = "Saved permanently & exported to ${dl.exportedDisplayPath}"
+            }.onFailure { err ->
+                _chatNotice.value = err.localizedMessage ?: "Download failed"
             }
         }
     }
@@ -746,7 +979,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _chatNotice.value = "Enable AI Assistant consent in Settings or AI tab first."
             return
         }
-        val snippet = _messages.value.takeLast(20).joinToString("\n") { "${it.senderName}: ${it.text}" }
+        val snippet = messages.value.takeLast(20).joinToString("\n") { "${it.senderName}: ${it.text}" }
         if (snippet.isBlank()) return
         viewModelScope.launch {
             _aiHelperLoading.value = true
@@ -759,7 +992,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun generateSmartReplies(aiConsentGranted: Boolean) {
         if (!aiConsentGranted) return
-        val last = _messages.value.lastOrNull()?.text.orEmpty()
+        val last = messages.value.lastOrNull()?.text.orEmpty()
         if (last.isBlank()) return
         viewModelScope.launch {
             val res = aiRepo.generateQuickText(
@@ -784,6 +1017,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        networkCallback?.let { cb ->
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            runCatching { cm?.unregisterNetworkCallback(cb) }
+        }
         voiceRecorderPlayer.release()
         super.onCleared()
     }

@@ -8,6 +8,11 @@ object AppConstants {
 
     const val DEFAULT_MAX_UPLOAD_MB = 25L
     const val STORY_TTL_MILLIS = 24L * 60L * 60L * 1000L
+    const val MEDIA_RETENTION_DAYS = 7L
+    const val MEDIA_RETENTION_MILLIS = MEDIA_RETENTION_DAYS * 24L * 60L * 60L * 1000L
+    const val SUPABASE_BUCKET = "chat-media"
+    const val GOOGLE_DRIVE_BACKUP_FOLDER = "My Messaging App Backups"
+    const val GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
     const val MESSAGE_PAGE_SIZE = 40L
 
     // Public Google STUN servers + optional configured TURN server via Secrets / .env
@@ -23,7 +28,7 @@ object AppConstants {
     val turnUsername: String get() = cleanSecret(BuildConfig.TURN_USERNAME)
     val turnCredential: String get() = cleanSecret(BuildConfig.TURN_CREDENTIAL)
 
-    val cloudinaryCloudName: String get() = cleanSecret(BuildConfig.CLOUDINARY_CLOUD_NAME)
-    val cloudinaryUploadPreset: String get() = cleanSecret(BuildConfig.CLOUDINARY_UPLOAD_PRESET)
-    val cloudinarySigningEndpoint: String get() = cleanSecret(BuildConfig.CLOUDINARY_SIGNING_ENDPOINT)
+    val supabaseUrl: String get() = cleanSecret(BuildConfig.SUPABASE_URL).trimEnd('/')
+    val supabaseAnonKey: String get() = cleanSecret(BuildConfig.SUPABASE_ANON_KEY)
+    val supabaseMediaBridgeUrl: String get() = cleanSecret(BuildConfig.SUPABASE_MEDIA_BRIDGE_URL).trimEnd('/')
 }

@@ -1,6 +1,6 @@
-# PrivacyX — Firebase Setup
+# PrivacyX — Firebase & Supabase Backend Setup
 
-## Provisioned Project Details
+## Provisioned Firebase Project Details
 - **Firebase Project ID**: `privacy-x`
 - **Android Application ID**: `com.privacy.x`
 - **Named Firestore Database ID**: `ai-studio-android-privacyx-5767d797-31a9-488e-9a25-d28909171c2e`
@@ -11,6 +11,7 @@
 ## Authentication
 - **Provider**: Google Sign-In via Android Jetpack `CredentialManager` (`GetGoogleIdOption` and `GetSignInWithGoogleOption`).
 - Anonymous authentication and email/password authentication are intentionally **not** used in application runtime code.
+- Google Drive backup authorization uses Play Services `Identity.getAuthorizationClient` requesting `https://www.googleapis.com/auth/drive.file`.
 
 ## Firebase App Check
 - Initialized in `MainActivity.onCreate()` via `configureAppCheck(this, intent)` **before** any Compose UI or Firebase calls.
@@ -21,16 +22,22 @@
 - Uses `Firebase.ai.generativeModel("gemini-3.8-flash")` without any client-side `GEMINI_API_KEY`.
 - Authenticated by Firebase App Check attestation.
 
-## Cloud Functions (`/functions`)
-Deploy optional server-side triggers and signed Cloudinary endpoint from `/functions`:
+## Supabase Setup (`/supabase`)
+Apply SQL migration `/supabase/migrations/20261116_chat_media.sql` on your existing Supabase project to provision private bucket `chat-media`, table `media_objects`, and RLS policies.
+Deploy the Supabase Edge Functions if hosting the bridge on Supabase:
+```bash
+supabase secrets set FIREBASE_PROJECT_ID=privacy-x SUPABASE_SERVICE_ROLE_KEY=<service_role_key> CLEANUP_CRON_SECRET=<cron_secret>
+supabase functions deploy media-bridge
+supabase functions deploy cleanup-expired-media
+```
+
+## Firebase Cloud Functions (`/functions`)
+Optionally deploy the Cloud Functions bridge, cleanup endpoints, and FCM dispatcher:
 ```bash
 cd functions
 npm install
 npm run build
+firebase functions:secrets:set SUPABASE_URL
+firebase functions:secrets:set SUPABASE_SERVICE_ROLE_KEY
 firebase deploy --only functions
-```
-Set Firebase Function secrets for production signed media uploads:
-```bash
-firebase functions:secrets:set CLOUDINARY_API_KEY
-firebase functions:secrets:set CLOUDINARY_API_SECRET
 ```

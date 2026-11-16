@@ -11,7 +11,7 @@ import com.example.data.model.Story
 import com.example.data.model.StoryView
 import com.example.data.model.UserProfile
 import com.example.data.repository.SocialRepository
-import com.example.media.CloudinaryMediaService
+import com.example.media.SupabaseMediaService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 class SocialViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
     private val socialRepo = SocialRepository(context)
-    private val mediaService = CloudinaryMediaService(context)
+    private val mediaService = SupabaseMediaService(context)
 
     private val _activeStories = MutableStateFlow<List<Story>>(emptyList())
     val activeStories: StateFlow<List<Story>> = _activeStories.asStateFlow()
@@ -111,10 +111,10 @@ class SocialViewModel(application: Application) : AndroidViewModel(application) 
             var mediaUrl = ""
             var mediaType = "text"
             if (mediaUri != null) {
-                val up = mediaService.uploadMedia(mediaUri)
+                val up = mediaService.uploadMedia(mediaUri, conversationId = "stories")
                 up.onSuccess {
                     mediaUrl = it.secureUrl
-                    mediaType = if (it.category == "video") "video" else "image"
+                    mediaType = "image"
                 }.onFailure { err ->
                     _isUploadingStoryOrPost.value = false
                     _socialNotice.value = err.localizedMessage ?: "Media upload failed"
@@ -161,7 +161,7 @@ class SocialViewModel(application: Application) : AndroidViewModel(application) 
             _isUploadingStoryOrPost.value = true
             var mediaUrl = ""
             if (mediaUri != null) {
-                val up = mediaService.uploadMedia(mediaUri)
+                val up = mediaService.uploadMedia(mediaUri, conversationId = "posts")
                 up.onSuccess { mediaUrl = it.secureUrl }.onFailure { err ->
                     _isUploadingStoryOrPost.value = false
                     _socialNotice.value = err.localizedMessage ?: "Post image upload failed"

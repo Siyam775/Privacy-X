@@ -481,6 +481,10 @@ class MessagingRepository(private val db: FirebaseFirestore) {
         text: String,
         mediaType: String = "text",
         mediaUrl: String = "",
+        mediaId: String = "",
+        mediaThumbnailUrl: String = "",
+        mediaExpiresAt: Long = 0L,
+        mediaExpired: Boolean = false,
         fileName: String = "",
         fileSizeBytes: Long = 0L,
         mimeType: String = "",
@@ -492,10 +496,17 @@ class MessagingRepository(private val db: FirebaseFirestore) {
         pollQuestion: String = "",
         pollOptions: List<String> = emptyList(),
         disappearsInMinutes: Long? = null,
-        scheduledDelayMinutes: Long? = null
+        scheduledDelayMinutes: Long? = null,
+        customMessageId: String? = null
     ): Result<String> {
+        if (mediaType.equals("video", ignoreCase = true) || mimeType.startsWith("video/", ignoreCase = true)) {
+            return Result.failure(
+                IllegalArgumentException("Video messaging is disabled. Use photos, voice notes, documents, or WebRTC video calls.")
+            )
+        }
         val uid = requireUserId()
-        val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(18)}"
+        val msgId = customMessageId?.takeIf { it.isNotBlank() }
+            ?: "msg_${UUID.randomUUID().toString().replace("-", "").take(18)}"
         val convRef = db.collection("conversations").document(conversation.id)
         val msgRef = convRef.collection("messages").document(msgId)
 
@@ -515,7 +526,11 @@ class MessagingRepository(private val db: FirebaseFirestore) {
             "memberUids" to conversation.memberUids,
             "isPublic" to conversation.isPublic,
             "text" to text.take(8000),
-            "mediaUrl" to mediaUrl.take(1000),
+            "mediaUrl" to mediaUrl.take(1500),
+            "mediaId" to mediaId.take(128),
+            "mediaThumbnailUrl" to mediaThumbnailUrl.take(1500),
+            "mediaExpiresAt" to mediaExpiresAt,
+            "mediaExpired" to mediaExpired,
             "mediaType" to mediaType,
             "fileName" to fileName.take(256),
             "fileSizeBytes" to fileSizeBytes,
@@ -541,7 +556,6 @@ class MessagingRepository(private val db: FirebaseFirestore) {
 
         val previewText = when (mediaType) {
             "image" -> "Photo"
-            "video" -> "Video"
             "voice" -> "Voice message"
             "document" -> fileName.ifEmpty { "Document" }
             "poll" -> "Poll: ${pollQuestion.take(60)}"

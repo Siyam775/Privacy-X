@@ -1,9 +1,11 @@
 package com.example.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -69,6 +71,7 @@ import com.example.ui.screens.IncomingCallBanner
 import com.example.ui.screens.NotificationsScreen
 import com.example.ui.screens.ProfileAndSettingsScreen
 import com.example.ui.screens.SavedMessagesScreen
+import com.example.ui.screens.StorageAndBackupScreen
 import com.example.ui.screens.StoriesScreen
 import com.example.ui.screens.SuperAdminDashboardScreen
 import com.example.ui.screens.UsernameOnboardingScreen
@@ -88,6 +91,7 @@ sealed interface SecondaryDestination {
     data object AiAssistant : SecondaryDestination
     data object Notifications : SecondaryDestination
     data object SavedMessages : SecondaryDestination
+    data object StorageAndBackup : SecondaryDestination
     data object SuperAdmin : SecondaryDestination
 }
 
@@ -126,11 +130,22 @@ fun PrivacyXApp(
     val isBusy by appViewModel.isBusy.collectAsStateWithLifecycle()
     val statusBanner by appViewModel.statusBanner.collectAsStateWithLifecycle()
     val isRadialMenuOpen by appViewModel.isRadialMenuOpen.collectAsStateWithLifecycle()
+    val storageStats by appViewModel.storageStats.collectAsStateWithLifecycle()
+    val backupPreferences by appViewModel.backupPreferences.collectAsStateWithLifecycle()
+    val backupHistory by appViewModel.backupHistory.collectAsStateWithLifecycle()
+    val driveBackups by appViewModel.driveBackups.collectAsStateWithLifecycle()
+    val isBackupBusy by appViewModel.isBackupBusy.collectAsStateWithLifecycle()
+    val pendingDriveConsent by appViewModel.pendingDriveConsent.collectAsStateWithLifecycle()
 
     val myConversations by chatViewModel.myConversations.collectAsStateWithLifecycle()
     val publicConversations by chatViewModel.publicConversations.collectAsStateWithLifecycle()
     val activeConversation by chatViewModel.activeConversation.collectAsStateWithLifecycle()
     val messages by chatViewModel.messages.collectAsStateWithLifecycle()
+    val localMediaMap by chatViewModel.localMediaMap.collectAsStateWithLifecycle()
+    val pendingMessageIds by chatViewModel.pendingMessageIds.collectAsStateWithLifecycle()
+    val knownBackupMediaIds by chatViewModel.knownBackupMediaIds.collectAsStateWithLifecycle()
+    val isOffline by chatViewModel.isOffline.collectAsStateWithLifecycle()
+    val downloadingMessageId by chatViewModel.downloadingMessageId.collectAsStateWithLifecycle()
     val allMembers by chatViewModel.allMembers.collectAsStateWithLifecycle()
     val myMemberState by chatViewModel.myMemberState.collectAsStateWithLifecycle()
     val topics by chatViewModel.topics.collectAsStateWithLifecycle()
@@ -314,6 +329,39 @@ fun PrivacyXApp(
                 }
                 val quickDocPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                     if (uri != null) pendingQuickUploadUri = uri
+                }
+
+                var pendingExportPassphrase by remember { mutableStateOf("") }
+                var pendingRestorePassphrase by remember { mutableStateOf("") }
+
+                val exportBackupLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.CreateDocument("application/octet-stream")
+                ) { uri ->
+                    if (uri != null) appViewModel.exportLocalBackupToUri(uri, pendingExportPassphrase)
+                }
+
+                val restoreBackupLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri ->
+                    if (uri != null) appViewModel.restoreFromLocalBackupUri(uri, pendingRestorePassphrase)
+                }
+
+                val driveConsentLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartIntentSenderForResult()
+                ) { result ->
+                    if (result.resultCode == Activity.RESULT_OK) {
+                        appViewModel.onDriveConsentIntentResult(result.data)
+                    } else {
+                        appViewModel.clearPendingDriveConsent()
+                        appViewModel.postBanner("Google Drive authorization cancelled")
+                    }
+                }
+
+                LaunchedEffect(pendingDriveConsent) {
+                    val pi = pendingDriveConsent
+                    if (pi != null) {
+                        driveConsentLauncher.launch(IntentSenderRequest.Builder(pi).build())
+                    }
                 }
 
                 fun openChat(conv: Conversation, isPublicPreview: Boolean = false) {
@@ -516,6 +564,12 @@ fun PrivacyXApp(
                                                             onUnblockUser = { appViewModel.toggleBlock(it) },
                                                             onOpenSavedMessages = { secondary = SecondaryDestination.SavedMessages },
                                                             onOpenAiAssistant = { secondary = SecondaryDestination.AiAssistant },
+                                                            onOpenStorageAndBackup = {
+                                                                secondary = SecondaryDestination.StorageAndBackup
+                                                                if (backupPreferences.driveConnected) {
+                                                                    appViewModel.refreshDriveBackups()
+                                                                }
+                                                            },
                                                             onOpenAdminDashboard = {
                                                                 adminViewModel.bindAdminDashboard()
                                                                 secondary = SecondaryDestination.SuperAdmin
@@ -584,7 +638,7 @@ fun PrivacyXApp(
                                                     showDialerExternal = true
                                                 }
                                                 RadialAction.SHARE_IMAGE -> quickMediaPicker.launch(
-                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                                 )
                                                 RadialAction.SEND_DOCUMENT -> quickDocPicker.launch(
                                                     arrayOf("application/pdf", "text/plain", "application/zip", "*/*")
@@ -741,7 +795,13 @@ fun PrivacyXApp(
                                     onAddMember = { uid -> chatViewModel.addMember(conv.id, uid) },
                                     onRemoveMember = { uid -> chatViewModel.removeMember(conv.id, uid) },
                                     onPromoteMember = { uid -> chatViewModel.promoteMember(conv.id, uid) },
-                                    onDemoteMember = { uid -> chatViewModel.demoteMember(conv.id, uid) }
+                                    onDemoteMember = { uid -> chatViewModel.demoteMember(conv.id, uid) },
+                                    localMediaMap = localMediaMap,
+                                    pendingMessageIds = pendingMessageIds,
+                                    knownBackupMediaIds = knownBackupMediaIds,
+                                    isOffline = isOffline,
+                                    downloadingMessageId = downloadingMessageId,
+                                    onDownloadMedia = { msg -> chatViewModel.downloadMessageMedia(msg) }
                                 )
                             }
                         }
@@ -778,6 +838,32 @@ fun PrivacyXApp(
                             onBack = { secondary = SecondaryDestination.None },
                             onAddNote = { socialViewModel.saveQuickNote(it) },
                             onDeleteItem = { socialViewModel.deleteSavedMessage(it) }
+                        )
+
+                        SecondaryDestination.StorageAndBackup -> StorageAndBackupScreen(
+                            storageStats = storageStats,
+                            backupPrefs = backupPreferences,
+                            driveBackups = driveBackups,
+                            backupHistory = backupHistory,
+                            isBackupBusy = isBackupBusy,
+                            onBack = { secondary = SecondaryDestination.None },
+                            onClearTemporaryCache = { appViewModel.clearLocalCache() },
+                            onConnectDrive = { appViewModel.connectOrBackupGoogleDrive(backupAfterAuth = false) },
+                            onDisconnectDrive = { appViewModel.disconnectDrive() },
+                            onRefreshDriveBackups = { appViewModel.refreshDriveBackups() },
+                            onBackupNowToDrive = { pw -> appViewModel.connectOrBackupGoogleDrive(pw, backupAfterAuth = true) },
+                            onSelectSchedule = { appViewModel.setBackupSchedule(it) },
+                            onToggleIncludeMedia = { appViewModel.setIncludeMediaInBackup(it) },
+                            onRestoreDriveFile = { file, pw -> appViewModel.restoreFromDriveFile(file, pw) },
+                            onExportLocalZip = { pw ->
+                                pendingExportPassphrase = pw
+                                val ext = if (pw.isNotBlank()) "pxbackup" else "zip"
+                                exportBackupLauncher.launch("privacyx_backup_${System.currentTimeMillis()}.$ext")
+                            },
+                            onRestoreLocalZip = { pw ->
+                                pendingRestorePassphrase = pw
+                                restoreBackupLauncher.launch(arrayOf("*/*"))
+                            }
                         )
 
                         SecondaryDestination.SuperAdmin -> SuperAdminDashboardScreen(

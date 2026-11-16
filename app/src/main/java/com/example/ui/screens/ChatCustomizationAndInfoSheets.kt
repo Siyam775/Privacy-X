@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.NotificationsOff
@@ -85,6 +86,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.core.ChatAppearancePreferences
+import com.example.data.local.LocalMediaEntity
 import com.example.data.model.ChatMessage
 import com.example.data.model.Conversation
 import com.example.data.model.UsernameReservation
@@ -94,6 +96,7 @@ import com.example.ui.components.UserAvatar
 import com.example.ui.theme.ChatColorPreset
 import com.example.ui.theme.ChatWallpaperPreset
 import com.example.ui.theme.LocalPrivacyXTokens
+import java.io.File
 
 @Composable
 fun ChatAppearanceSheetDialog(
@@ -304,12 +307,14 @@ fun ChatAppearanceSheetDialog(
 fun ChatSharedMediaAndPinnedSheetDialog(
     messages: List<ChatMessage>,
     playbackState: VoicePlaybackState,
+    localMediaMap: Map<String, LocalMediaEntity> = emptyMap(),
+    knownBackupMediaIds: Set<String> = emptySet(),
     onJumpToMessage: (ChatMessage) -> Unit,
     onTogglePin: (ChatMessage) -> Unit,
     onTogglePlayVoice: (String) -> Unit,
     onOpenImage: (String) -> Unit,
-    onOpenVideo: (String) -> Unit,
     onOpenDocument: (String) -> Unit,
+    onDownloadMedia: (ChatMessage) -> Unit = {},
     onDismiss: () -> Unit,
     initialTab: String = "Media"
 ) {
@@ -317,14 +322,23 @@ fun ChatSharedMediaAndPinnedSheetDialog(
     var activeTab by remember { mutableStateOf(initialTab) }
     val urlRegex = remember { Regex("""https?://[^\s<>"]+""", RegexOption.IGNORE_CASE) }
 
-    val mediaMessages = remember(messages) {
-        messages.filter { !it.isDeleted && (it.mediaType == "image" || it.mediaType == "video") && it.mediaUrl.isNotBlank() }
+    fun resolvePlayableOrViewablePath(msg: ChatMessage): String {
+        val local = localMediaMap[msg.mediaId.ifBlank { msg.id }] ?: localMediaMap[msg.id]
+        val localFile = local?.localFilePath?.takeIf { it.isNotBlank() }?.let(::File)
+        if (localFile != null && localFile.exists()) return Uri.fromFile(localFile).toString()
+        val cloudExpired = msg.mediaExpired || msg.mediaUrl.isBlank() ||
+            (msg.mediaExpiresAt > 0L && msg.mediaExpiresAt <= System.currentTimeMillis())
+        return if (cloudExpired) "" else msg.mediaUrl
     }
-    val voiceMessages = remember(messages) {
-        messages.filter { !it.isDeleted && it.mediaType == "voice" && it.mediaUrl.isNotBlank() }
+
+    val mediaMessages = remember(messages, localMediaMap) {
+        messages.filter { !it.isDeleted && it.mediaType == "image" }
     }
-    val fileMessages = remember(messages) {
-        messages.filter { !it.isDeleted && it.mediaType == "document" && it.mediaUrl.isNotBlank() }
+    val voiceMessages = remember(messages, localMediaMap) {
+        messages.filter { !it.isDeleted && it.mediaType == "voice" }
+    }
+    val fileMessages = remember(messages, localMediaMap) {
+        messages.filter { !it.isDeleted && it.mediaType == "document" }
     }
     val pinnedMessages = remember(messages) {
         messages.filter { !it.isDeleted && it.isPinned }
@@ -398,34 +412,48 @@ fun ChatSharedMediaAndPinnedSheetDialog(
                     when (activeTab) {
                         "Media" -> {
                             if (mediaMessages.isEmpty()) {
-                                item { Text("No shared photos or videos yet.", style = MaterialTheme.typography.bodySmall) }
+                                item { Text("No shared photos yet.", style = MaterialTheme.typography.bodySmall) }
                             } else {
                                 items(mediaMessages, key = { it.id }) { msg ->
+                                    val resolved = resolvePlayableOrViewablePath(msg)
+                                    val inBackup = msg.mediaId in knownBackupMediaIds
                                     GlassCard(
                                         modifier = Modifier.fillMaxWidth(),
-                                        onClick = {
-                                            if (msg.mediaType == "image") onOpenImage(msg.mediaUrl) else onOpenVideo(msg.mediaUrl)
-                                        }
+                                        onClick = { if (resolved.isNotBlank()) onOpenImage(resolved) }
                                     ) {
                                         Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            if (msg.mediaType == "image") {
+                                            if (resolved.isNotBlank()) {
                                                 AsyncImage(
-                                                    model = msg.mediaUrl,
+                                                    model = resolved,
                                                     contentDescription = "Media",
                                                     contentScale = ContentScale.Crop,
                                                     modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))
                                                 )
                                             } else {
-                                                Surface(shape = RoundedCornerShape(10.dp), color = tokens.accentPrimary.copy(alpha = 0.2f), modifier = Modifier.size(56.dp)) {
+                                                Surface(shape = RoundedCornerShape(10.dp), color = tokens.surfaceGlass, modifier = Modifier.size(56.dp)) {
                                                     Box(contentAlignment = Alignment.Center) {
-                                                        Icon(Icons.Rounded.PlayArrow, contentDescription = "Video", tint = tokens.accentPrimary)
+                                                        Icon(Icons.Rounded.Image, contentDescription = "Unavailable", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                                     }
                                                 }
                                             }
                                             Spacer(Modifier.width(10.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(msg.senderName, style = MaterialTheme.typography.titleSmall)
-                                                Text(msg.text.ifBlank { msg.mediaType.uppercase() }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(
+                                                    text = when {
+                                                        resolved.isBlank() && inBackup -> "Available in Backup"
+                                                        resolved.isBlank() -> "Media unavailable (7-day expired)"
+                                                        else -> msg.text.ifBlank { "PHOTO" }
+                                                    },
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            if (resolved.isNotBlank()) {
+                                                IconButton(onClick = { onDownloadMedia(msg) }) {
+                                                    Icon(Icons.Rounded.Download, contentDescription = "Save locally", tint = tokens.accentPrimary)
+                                                }
                                             }
                                             TextButton(onClick = { onJumpToMessage(msg) }) { Text("Jump") }
                                         }
@@ -438,19 +466,36 @@ fun ChatSharedMediaAndPinnedSheetDialog(
                                 item { Text("No voice messages yet.", style = MaterialTheme.typography.bodySmall) }
                             } else {
                                 items(voiceMessages, key = { it.id }) { msg ->
-                                    val isPlaying = playbackState.activeUrl == msg.mediaUrl && playbackState.isPlaying
+                                    val resolved = resolvePlayableOrViewablePath(msg)
+                                    val inBackup = msg.mediaId in knownBackupMediaIds
+                                    val isPlaying = resolved.isNotBlank() && playbackState.activeUrl == resolved && playbackState.isPlaying
                                     GlassCard(modifier = Modifier.fillMaxWidth()) {
                                         Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            IconButton(onClick = { onTogglePlayVoice(msg.mediaUrl) }) {
+                                            IconButton(
+                                                onClick = { if (resolved.isNotBlank()) onTogglePlayVoice(resolved) },
+                                                enabled = resolved.isNotBlank()
+                                            ) {
                                                 Icon(
                                                     if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                                     contentDescription = "Play Voice",
-                                                    tint = tokens.accentPrimary
+                                                    tint = if (resolved.isNotBlank()) tokens.accentPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(msg.senderName, style = MaterialTheme.typography.titleSmall)
-                                                Text("${(msg.durationMs / 1000L).coerceAtLeast(1)}s voice note", style = MaterialTheme.typography.bodySmall)
+                                                Text(
+                                                    text = when {
+                                                        resolved.isBlank() && inBackup -> "Available in Backup"
+                                                        resolved.isBlank() -> "Voice note unavailable (7-day expired)"
+                                                        else -> "${(msg.durationMs / 1000L).coerceAtLeast(1)}s voice note"
+                                                    },
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                            if (resolved.isNotBlank()) {
+                                                IconButton(onClick = { onDownloadMedia(msg) }) {
+                                                    Icon(Icons.Rounded.Download, contentDescription = "Save locally", tint = tokens.accentPrimary)
+                                                }
                                             }
                                             TextButton(onClick = { onJumpToMessage(msg) }) { Text("Jump") }
                                         }
@@ -463,16 +508,25 @@ fun ChatSharedMediaAndPinnedSheetDialog(
                                 item { Text("No shared documents yet.", style = MaterialTheme.typography.bodySmall) }
                             } else {
                                 items(fileMessages, key = { it.id }) { msg ->
+                                    val resolved = resolvePlayableOrViewablePath(msg)
                                     GlassCard(
                                         modifier = Modifier.fillMaxWidth(),
-                                        onClick = { onOpenDocument(msg.mediaUrl) }
+                                        onClick = { if (resolved.isNotBlank()) onOpenDocument(resolved) }
                                     ) {
                                         Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Rounded.Description, contentDescription = "Document", tint = tokens.accentPrimary)
                                             Spacer(Modifier.width(10.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(msg.fileName.ifBlank { "Document" }, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text("From ${msg.senderName} • ${(msg.fileSizeBytes / 1024L).coerceAtLeast(1)} KB", style = MaterialTheme.typography.bodySmall)
+                                                Text(
+                                                    text = if (resolved.isBlank()) "File unavailable (7-day expired)" else "From ${msg.senderName} • ${(msg.fileSizeBytes / 1024L).coerceAtLeast(1)} KB",
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                            if (resolved.isNotBlank()) {
+                                                IconButton(onClick = { onDownloadMedia(msg) }) {
+                                                    Icon(Icons.Rounded.Download, contentDescription = "Save locally", tint = tokens.accentPrimary)
+                                                }
                                             }
                                             TextButton(onClick = { onJumpToMessage(msg) }) { Text("Jump") }
                                         }

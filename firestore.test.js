@@ -406,3 +406,63 @@ test("Group adminsOnlyMessaging blocks non-admin messages and allows admin messa
   );
 });
 
+test("Video messaging and video MIME types are strictly rejected by Firestore rules", async () => {
+  const ts = pastTs();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await assertSucceeds(
+    aliceDb.collection("conversations").doc("conv_no_video").set({
+      type: "direct",
+      title: "No Video Chat",
+      ownerId: ALICE_UID,
+      memberUids: [ALICE_UID],
+      adminUids: [ALICE_UID],
+      isPublic: false,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // mediaType = "video" rejected
+  await assertFails(
+    aliceDb
+      .collection("conversations")
+      .doc("conv_no_video")
+      .collection("messages")
+      .doc("vid_msg_1")
+      .set({
+        conversationId: "conv_no_video",
+        senderId: ALICE_UID,
+        senderName: "Alice",
+        memberUids: [ALICE_UID],
+        isPublic: false,
+        text: "Video clip",
+        mediaType: "video",
+        mimeType: "video/mp4",
+        createdAt: ts,
+        updatedAt: ts,
+      })
+  );
+
+  // Spoofing mediaType = "document" with video/mp4 MIME rejected
+  await assertFails(
+    aliceDb
+      .collection("conversations")
+      .doc("conv_no_video")
+      .collection("messages")
+      .doc("vid_msg_2")
+      .set({
+        conversationId: "conv_no_video",
+        senderId: ALICE_UID,
+        senderName: "Alice",
+        memberUids: [ALICE_UID],
+        isPublic: false,
+        text: "Disguised video",
+        mediaType: "document",
+        mimeType: "video/mp4",
+        createdAt: ts,
+        updatedAt: ts,
+      })
+  );
+});
+

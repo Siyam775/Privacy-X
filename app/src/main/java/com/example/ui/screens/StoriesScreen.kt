@@ -546,12 +546,12 @@ private fun CreateStoryDialog(
                 }
                 item {
                     OutlinedButton(
-                        onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+                        onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Rounded.Image, contentDescription = "Pick Story Media")
+                        Icon(Icons.Rounded.Image, contentDescription = "Pick Story Photo")
                         Spacer(Modifier.width(8.dp))
-                        Text(if (mediaUri == null) "Attach Photo/Video" else "Media Selected ✓")
+                        Text(if (mediaUri == null) "Attach Photo" else "Photo Selected ✓")
                     }
                 }
                 item {

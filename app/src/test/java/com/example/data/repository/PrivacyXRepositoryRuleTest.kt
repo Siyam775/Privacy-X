@@ -200,6 +200,46 @@ class PrivacyXRepositoryRuleTest : FirestoreEmulatorTestBase() {
         assertTrue(withTimeout(TIMEOUT_MS) { msgRepo.demoteMemberFromAdmin(convId, bobUid) }.isSuccess)
     }
 
+    @Test
+    fun messagingRepository_videoMediaAndVideoMime_areRejected() = runBlocking {
+        val suffix = UUID.randomUUID().toString().replace("-", "").take(6)
+        val aliceUid = signInTestUser("vid_alice_$suffix@test.com")
+        val bobUid = signInTestUser("vid_bob_$suffix@test.com")
+
+        signInTestUser("vid_alice_$suffix@test.com")
+        val msgRepo = MessagingRepository(firestore)
+        val convId = withTimeout(TIMEOUT_MS) {
+            msgRepo.createOrGetDirectConversation(bobUid, "Bob", "").getOrThrow()
+        }
+        val conv = withTimeout(FLOW_TIMEOUT_MS) {
+            msgRepo.observeMyConversations(aliceUid).first { list -> list.any { it.id == convId } }
+        }.first { it.id == convId }
+
+        val videoTypeRes = withTimeout(TIMEOUT_MS) {
+            msgRepo.sendMessage(
+                conversation = conv,
+                senderName = "Alice",
+                senderAvatarUrl = "",
+                text = "Video test",
+                mediaType = "video",
+                mimeType = "video/mp4"
+            )
+        }
+        assertTrue("Video mediaType must be rejected", videoTypeRes.isFailure)
+
+        val videoMimeRes = withTimeout(TIMEOUT_MS) {
+            msgRepo.sendMessage(
+                conversation = conv,
+                senderName = "Alice",
+                senderAvatarUrl = "",
+                text = "Video mime test",
+                mediaType = "document",
+                mimeType = "video/mp4"
+            )
+        }
+        assertTrue("video/mp4 MIME type must be rejected", videoMimeRes.isFailure)
+    }
+
     private companion object {
         const val TIMEOUT_MS = 5000L
         const val FLOW_TIMEOUT_MS = 4000L

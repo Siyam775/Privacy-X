@@ -1,8 +1,5 @@
 package com.example.ui.screens
 
-import android.net.Uri
-import android.widget.MediaController
-import android.widget.VideoView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +28,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Pause
@@ -68,7 +66,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
@@ -151,12 +148,14 @@ fun VoiceRecordingComposerBar(
 fun MessageActionPopoverDialog(
     message: ChatMessage,
     isMine: Boolean,
+    canDownloadMedia: Boolean = false,
     onDismiss: () -> Unit,
     onReact: (String) -> Unit,
     onReply: () -> Unit,
     onForward: () -> Unit,
     onCopy: () -> Unit,
     onPin: () -> Unit,
+    onDownload: () -> Unit = {},
     onTranslate: () -> Unit,
     onBookmark: () -> Unit,
     onEdit: () -> Unit,
@@ -190,6 +189,9 @@ fun MessageActionPopoverDialog(
                 PopoverActionRow(Icons.AutoMirrored.Rounded.Forward, "Forward", onClick = onForward)
                 PopoverActionRow(Icons.Rounded.ContentCopy, "Copy Text", onClick = onCopy)
                 PopoverActionRow(Icons.Rounded.PushPin, if (message.isPinned) "Unpin" else "Pin Message", onClick = onPin)
+                if (canDownloadMedia) {
+                    PopoverActionRow(Icons.Rounded.Download, "Download Media to Device", onClick = onDownload)
+                }
                 PopoverActionRow(Icons.Rounded.Translate, "Translate with AI", onClick = onTranslate)
                 PopoverActionRow(Icons.Rounded.Bookmark, "Save to Bookmarks", onClick = onBookmark)
                 if (isMine && !message.isDeleted) {
@@ -226,7 +228,7 @@ private fun PopoverActionRow(
 fun ChatAttachmentSheetDialog(
     compressImages: Boolean,
     onToggleCompress: (Boolean) -> Unit,
-    onPickImageVideo: () -> Unit,
+    onPickImage: () -> Unit,
     onPickDocument: () -> Unit,
     onCreatePoll: () -> Unit,
     onSetDisappearing: (Long) -> Unit,
@@ -239,7 +241,7 @@ fun ChatAttachmentSheetDialog(
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Attach & Actions", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(10.dp))
-                PopoverActionRow(Icons.Rounded.Image, "Photo or Video (Photo Picker)", onClick = onPickImageVideo)
+                PopoverActionRow(Icons.Rounded.Image, "Photo (Photo Picker)", onClick = onPickImage)
                 PopoverActionRow(Icons.Rounded.Description, "Document (PDF, DOC, ZIP, TXT)", onClick = onPickDocument)
                 PopoverActionRow(Icons.Rounded.Poll, "Create Poll", onClick = onCreatePoll)
                 PopoverActionRow(Icons.Rounded.Timer, "Disappearing Message (5 min)", onClick = { onSetDisappearing(5L) })
@@ -378,33 +380,6 @@ fun FullScreenZoomableImageDialog(imageUrl: String, onDismiss: () -> Unit) {
                 modifier = Modifier.align(Alignment.TopEnd).padding(20.dp)
             ) {
                 Icon(Icons.Rounded.Close, contentDescription = "Close Image", tint = Color.White)
-            }
-        }
-    }
-}
-
-@Composable
-fun FullScreenVideoDialog(videoUrl: String, onDismiss: () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
-                        setVideoURI(Uri.parse(videoUrl))
-                        setMediaController(MediaController(ctx).apply { setAnchorView(this@apply) })
-                        start()
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp)
-            ) {
-                Icon(Icons.Rounded.Close, contentDescription = "Close Video", tint = Color.White)
             }
         }
     }

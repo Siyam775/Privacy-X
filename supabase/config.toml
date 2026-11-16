@@ -1,0 +1,9 @@
+# PrivacyX Supabase Edge Functions Configuration
+# Both functions perform cryptographic verification in-code (Firebase ID tokens / Cron secret),
+# so Supabase gateway JWT verification must be disabled to accept Firebase Auth ID tokens.
+
+[functions.media-bridge]
+verify_jwt = false
+
+[functions.cleanup-expired-media]
+verify_jwt = false

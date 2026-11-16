@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.CleaningServices
@@ -115,6 +116,7 @@ fun ProfileAndSettingsScreen(
     onUnblockUser: (String) -> Unit,
     onOpenSavedMessages: () -> Unit,
     onOpenAiAssistant: () -> Unit,
+    onOpenStorageAndBackup: () -> Unit = {},
     onOpenAdminDashboard: () -> Unit,
     onClearCache: () -> Unit,
     onExportData: () -> Unit,
@@ -226,6 +228,27 @@ fun ProfileAndSettingsScreen(
                         Icon(Icons.Rounded.AutoAwesome, contentDescription = "AI", tint = tokens.accentSecondary)
                         Spacer(Modifier.width(8.dp))
                         Text("AI Studio", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+
+        item {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth().testTag("profile_storage_backup_card"),
+                elevated = true,
+                onClick = onOpenStorageAndBackup
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Backup, contentDescription = "Storage & Backup", tint = tokens.accentPrimary)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Storage, 7-Day Cloud & Drive Backup", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Local media manager, 7-day auto-delete policy & encrypted Google Drive restore",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -390,9 +413,9 @@ fun ProfileAndSettingsScreen(
                         Text("Blocked Users (${blockedUsers.size})")
                     }
                     OutlinedButton(onClick = onClearCache, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Rounded.CleaningServices, contentDescription = "Clear Cache")
+                        Icon(Icons.Rounded.CleaningServices, contentDescription = "Clear Temporary Cache")
                         Spacer(Modifier.width(8.dp))
-                        Text("Clear Local Cache")
+                        Text("Clear Temporary Cache (Keeps Saved Media)")
                     }
                     OutlinedButton(onClick = onExportData, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Rounded.Download, contentDescription = "Export Data")

@@ -51,8 +51,11 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -63,9 +66,12 @@ import androidx.compose.material.icons.rounded.PermMedia
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -101,6 +107,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.core.ChatAppearancePreferences
+import com.example.data.local.LocalMediaEntity
+import com.example.data.local.MediaAvailabilityState
 import com.example.data.model.ChatMessage
 import com.example.data.model.Conversation
 import com.example.data.model.ConversationMember
@@ -116,8 +124,11 @@ import com.example.ui.theme.ChatWallpaperLayer
 import com.example.ui.theme.LocalPrivacyXTokens
 import com.example.ui.viewmodel.UploadUiState
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 @Composable
@@ -190,7 +201,13 @@ fun ChatDetailScreen(
     onAddMember: (String) -> Unit = {},
     onRemoveMember: (String) -> Unit = {},
     onPromoteMember: (String) -> Unit = {},
-    onDemoteMember: (String) -> Unit = {}
+    onDemoteMember: (String) -> Unit = {},
+    localMediaMap: Map<String, LocalMediaEntity> = emptyMap(),
+    pendingMessageIds: Set<String> = emptySet(),
+    knownBackupMediaIds: Set<String> = emptySet(),
+    isOffline: Boolean = false,
+    downloadingMessageId: String? = null,
+    onDownloadMedia: (ChatMessage) -> Unit = {}
 ) {
     BackHandler(onBack = onBack)
 
@@ -211,7 +228,7 @@ fun ChatDetailScreen(
     var contextMenuTarget by remember { mutableStateOf<ChatMessage?>(null) }
     var forwardingTarget by remember { mutableStateOf<ChatMessage?>(null) }
     var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
-    var fullScreenVideoUrl by remember { mutableStateOf<String?>(null) }
+    var mediaInfoTarget by remember { mutableStateOf<ChatMessage?>(null) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showPollDialog by remember { mutableStateOf(false) }
     var showTopicDialog by remember { mutableStateOf(false) }
@@ -401,6 +418,30 @@ fun ChatDetailScreen(
                         modifier = Modifier.size(38.dp).testTag("chat_info_button")
                     ) {
                         Icon(Icons.Rounded.Info, contentDescription = "Chat Info & Manage")
+                    }
+                }
+            }
+
+            if (isOffline) {
+                Surface(
+                    color = tokens.warningAmber.copy(alpha = 0.16f),
+                    border = BorderStroke(0.8.dp, tokens.warningAmber.copy(alpha = 0.45f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.CloudOff, contentDescription = "Offline", tint = tokens.warningAmber, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Offline mode — cached messages & queued sending active",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
@@ -678,6 +719,33 @@ fun ChatDetailScreen(
                             }
                         }
 
+                        val localMedia = localMediaMap[msg.mediaId.ifBlank { msg.id }] ?: localMediaMap[msg.id]
+                        val localFile = localMedia?.localFilePath?.takeIf { it.isNotBlank() }?.let(::File)?.takeIf { it.exists() }
+                        val nowMs = System.currentTimeMillis()
+                        val cloudExpired = msg.mediaExpired || msg.mediaUrl.isBlank() ||
+                            (msg.mediaExpiresAt > 0L && msg.mediaExpiresAt <= nowMs)
+                        val availability = when {
+                            !cloudExpired && localFile != null -> MediaAvailabilityState.CLOUD_AND_LOCAL
+                            localFile != null -> MediaAvailabilityState.LOCAL_ONLY
+                            !cloudExpired -> MediaAvailabilityState.CLOUD_ONLY
+                            msg.mediaId.isNotBlank() && msg.mediaId in knownBackupMediaIds -> MediaAvailabilityState.BACKUP_ONLY
+                            else -> MediaAvailabilityState.MISSING
+                        }
+                        val resolvedMediaUri = when {
+                            localFile != null -> Uri.fromFile(localFile).toString()
+                            !cloudExpired -> msg.mediaUrl
+                            else -> ""
+                        }
+                        val expiresBadge = when {
+                            localFile != null && cloudExpired -> "Saved Locally"
+                            msg.mediaExpiresAt > nowMs -> {
+                                val daysLeft = TimeUnit.MILLISECONDS.toDays(msg.mediaExpiresAt - nowMs).coerceAtLeast(1L)
+                                if (localFile != null) "Local • ${daysLeft}d cloud" else "${daysLeft}d cloud"
+                            }
+                            availability == MediaAvailabilityState.BACKUP_ONLY -> "In Backup"
+                            else -> ""
+                        }
+
                         MessageBubbleItem(
                             message = msg,
                             isMine = msg.senderId == currentUser.userId,
@@ -687,21 +755,28 @@ fun ChatDetailScreen(
                             accentColor = effectiveAccent,
                             isSearchHighlight = msg.id == activeSearchMessageId || (searchQuery.isNotBlank() && msg.text.contains(searchQuery.trim(), ignoreCase = true)),
                             playbackState = playbackState,
+                            resolvedMediaUri = resolvedMediaUri,
+                            availabilityState = availability,
+                            expiresBadge = expiresBadge,
+                            isPendingOffline = msg.id in pendingMessageIds,
+                            isSavedToDevice = localMedia?.downloadedToDevice == true,
+                            isDownloading = downloadingMessageId == msg.id,
                             onTap = { contextMenuTarget = msg },
                             onDoubleTapHeart = { onToggleReaction(msg, "❤️") },
                             onSwipeReply = { replyTarget = msg },
                             onLongPress = { contextMenuTarget = msg },
                             onReactionTap = { emoji -> onToggleReaction(msg, emoji) },
                             onVotePoll = { opt -> onVotePoll(msg, opt) },
-                            onTogglePlayVoice = { onTogglePlayVoice(msg.mediaUrl) },
+                            onTogglePlayVoice = { if (resolvedMediaUri.isNotBlank()) onTogglePlayVoice(resolvedMediaUri) },
                             onCycleVoiceSpeed = onCycleVoiceSpeed,
-                            onOpenImage = { fullScreenImageUrl = msg.mediaUrl },
-                            onOpenVideo = { fullScreenVideoUrl = msg.mediaUrl },
+                            onOpenImage = { if (resolvedMediaUri.isNotBlank()) fullScreenImageUrl = resolvedMediaUri },
                             onOpenDocument = { url ->
                                 runCatching {
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
-                            }
+                            },
+                            onDownloadMedia = { onDownloadMedia(msg) },
+                            onShowMediaInfo = { mediaInfoTarget = msg }
                         )
                     }
                 }
@@ -972,9 +1047,11 @@ fun ChatDetailScreen(
 
     // Message Action Popover
     contextMenuTarget?.let { target ->
+        val hasDownloadable = target.mediaType in setOf("image", "voice", "document") && !target.isDeleted
         MessageActionPopoverDialog(
             message = target,
             isMine = target.senderId == currentUser.userId,
+            canDownloadMedia = hasDownloadable,
             onDismiss = { contextMenuTarget = null },
             onReact = { emoji ->
                 onToggleReaction(target, emoji)
@@ -995,6 +1072,10 @@ fun ChatDetailScreen(
             },
             onPin = {
                 onTogglePin(target)
+                contextMenuTarget = null
+            },
+            onDownload = {
+                onDownloadMedia(target)
                 contextMenuTarget = null
             },
             onTranslate = {
@@ -1021,9 +1102,9 @@ fun ChatDetailScreen(
         ChatAttachmentSheetDialog(
             compressImages = compressUploads,
             onToggleCompress = { compressUploads = it },
-            onPickImageVideo = {
+            onPickImage = {
                 showAttachmentSheet = false
-                mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
             onPickDocument = {
                 showAttachmentSheet = false
@@ -1084,8 +1165,43 @@ fun ChatDetailScreen(
         FullScreenZoomableImageDialog(imageUrl = url, onDismiss = { fullScreenImageUrl = null })
     }
 
-    fullScreenVideoUrl?.let { url ->
-        FullScreenVideoDialog(videoUrl = url, onDismiss = { fullScreenVideoUrl = null })
+    mediaInfoTarget?.let { target ->
+        val local = localMediaMap[target.mediaId.ifBlank { target.id }] ?: localMediaMap[target.id]
+        val hasLocal = local != null && File(local.localFilePath).exists()
+        val fmt = SimpleDateFormat("MMM d, yyyy h:mm a", Locale.getDefault())
+        val createdStr = target.createdAt?.toDate()?.let { fmt.format(it) } ?: "Unknown"
+        val expiryStr = when {
+            target.mediaExpired -> "Expired (cloud copy deleted after 7 days)"
+            target.mediaExpiresAt > 0L -> "Cloud auto-deletes on ${fmt.format(Date(target.mediaExpiresAt))}"
+            else -> "7-day retention policy"
+        }
+        AlertDialog(
+            onDismissRequest = { mediaInfoTarget = null },
+            title = { Text("Media Availability & Retention") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Created: $createdStr", style = MaterialTheme.typography.bodySmall)
+                    Text(expiryStr, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = if (hasLocal) "Local Copy: Saved permanently on device" else "Local Copy: Not downloaded yet",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (hasLocal) tokens.onlineGreen else tokens.warningAmber
+                    )
+                    if (target.mediaId in knownBackupMediaIds) {
+                        Text("Backup Manifest: Included in local/Drive backup", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                if (!target.mediaExpired && !hasLocal) {
+                    TextButton(onClick = {
+                        onDownloadMedia(target)
+                        mediaInfoTarget = null
+                    }) { Text("Save Locally") }
+                }
+                TextButton(onClick = { mediaInfoTarget = null }) { Text("Close") }
+            }
+        )
     }
 
     if (showAppearanceSheet) {
@@ -1104,6 +1220,8 @@ fun ChatDetailScreen(
         ChatSharedMediaAndPinnedSheetDialog(
             messages = visibleMessages,
             playbackState = playbackState,
+            localMediaMap = localMediaMap,
+            knownBackupMediaIds = knownBackupMediaIds,
             initialTab = startTab,
             onJumpToMessage = { msg ->
                 sharedSheetInitialTab = null
@@ -1113,10 +1231,10 @@ fun ChatDetailScreen(
             onTogglePin = onTogglePin,
             onTogglePlayVoice = onTogglePlayVoice,
             onOpenImage = { fullScreenImageUrl = it },
-            onOpenVideo = { fullScreenVideoUrl = it },
             onOpenDocument = { url ->
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             },
+            onDownloadMedia = onDownloadMedia,
             onDismiss = { sharedSheetInitialTab = null }
         )
     }
@@ -1208,6 +1326,12 @@ private fun MessageBubbleItem(
     accentColor: Color,
     isSearchHighlight: Boolean,
     playbackState: VoicePlaybackState,
+    resolvedMediaUri: String,
+    availabilityState: MediaAvailabilityState,
+    expiresBadge: String,
+    isPendingOffline: Boolean,
+    isSavedToDevice: Boolean,
+    isDownloading: Boolean,
     onTap: () -> Unit,
     onDoubleTapHeart: () -> Unit,
     onSwipeReply: () -> Unit,
@@ -1217,8 +1341,9 @@ private fun MessageBubbleItem(
     onTogglePlayVoice: () -> Unit,
     onCycleVoiceSpeed: () -> Unit,
     onOpenImage: () -> Unit,
-    onOpenVideo: () -> Unit,
-    onOpenDocument: (String) -> Unit
+    onOpenDocument: (String) -> Unit,
+    onDownloadMedia: () -> Unit,
+    onShowMediaInfo: () -> Unit
 ) {
     val tokens = LocalPrivacyXTokens.current
     var swipeOffsetPx by remember(message.id) { mutableFloatStateOf(0f) }
@@ -1334,73 +1459,191 @@ private fun MessageBubbleItem(
 
                     when (message.mediaType) {
                         "image" -> {
-                            if (message.mediaUrl.isNotBlank()) {
-                                AsyncImage(
-                                    model = message.mediaUrl,
-                                    contentDescription = "Shared image",
-                                    contentScale = ContentScale.Crop,
+                            if (resolvedMediaUri.isNotBlank()) {
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    AsyncImage(
+                                        model = resolvedMediaUri,
+                                        contentDescription = "Shared photo",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(190.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable(onClick = onOpenImage)
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (expiresBadge.isNotBlank()) {
+                                            Surface(
+                                                shape = RoundedCornerShape(999.dp),
+                                                color = Color.Black.copy(alpha = 0.62f),
+                                                modifier = Modifier.clickable(onClick = onShowMediaInfo)
+                                            ) {
+                                                Text(
+                                                    text = expiresBadge,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.White,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = Color.Black.copy(alpha = 0.62f),
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clickable(enabled = !isDownloading, onClick = onDownloadMedia)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                if (isDownloading) {
+                                                    CircularProgressIndicator(
+                                                        color = Color.White,
+                                                        strokeWidth = 2.dp,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = if (isSavedToDevice) Icons.Rounded.CloudDone else Icons.Rounded.Download,
+                                                        contentDescription = "Download Photo",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(6.dp))
+                            } else {
+                                Surface(
+                                    color = fgColor.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(190.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .clickable(onClick = onOpenImage)
-                                )
+                                        .clickable(onClick = onShowMediaInfo)
+                                ) {
+                                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.CloudOff, contentDescription = "Unavailable", tint = fgColor.copy(alpha = 0.78f))
+                                        Spacer(Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = if (availabilityState == MediaAvailabilityState.BACKUP_ONLY) "Available in Backup" else "Media unavailable",
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                                color = fgColor
+                                            )
+                                            Text(
+                                                text = "Cloud copy expired after 7 days",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = fgColor.copy(alpha = 0.72f)
+                                            )
+                                        }
+                                    }
+                                }
                                 Spacer(Modifier.height(6.dp))
                             }
                         }
                         "video" -> {
                             Surface(
-                                color = fgColor.copy(alpha = 0.16f),
+                                color = fgColor.copy(alpha = 0.12f),
                                 shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(onClick = onOpenVideo)
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Rounded.PlayArrow, contentDescription = "Play Video", tint = fgColor)
+                                    Icon(Icons.Rounded.CloudOff, contentDescription = "Disabled", tint = fgColor.copy(alpha = 0.78f))
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Tap to play video", style = MaterialTheme.typography.bodySmall, color = fgColor)
+                                    Text("Video messaging is disabled", style = MaterialTheme.typography.bodySmall, color = fgColor)
                                 }
                             }
                             Spacer(Modifier.height(6.dp))
                         }
                         "voice" -> {
-                            val isPlayingThis = playbackState.activeUrl == message.mediaUrl && playbackState.isPlaying
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = onTogglePlayVoice, modifier = Modifier.size(34.dp)) {
-                                    Icon(
-                                        imageVector = if (isPlayingThis) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                        contentDescription = "Play Voice",
-                                        tint = fgColor
-                                    )
+                            if (resolvedMediaUri.isNotBlank()) {
+                                val isPlayingThis = playbackState.activeUrl == resolvedMediaUri && playbackState.isPlaying
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = onTogglePlayVoice, modifier = Modifier.size(34.dp)) {
+                                        Icon(
+                                            imageVector = if (isPlayingThis) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                            contentDescription = "Play Voice",
+                                            tint = fgColor
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        LinearProgressIndicator(
+                                            progress = {
+                                                if (playbackState.activeUrl == resolvedMediaUri) playbackState.progressFraction else 0f
+                                            },
+                                            color = fgColor,
+                                            trackColor = fgColor.copy(alpha = 0.25f)
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(
+                                                text = "${(message.durationMs / 1000L).coerceAtLeast(1)}s voice",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = fgColor.copy(alpha = 0.85f)
+                                            )
+                                            if (expiresBadge.isNotBlank()) {
+                                                Text(
+                                                    text = "• $expiresBadge",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = fgColor.copy(alpha = 0.72f),
+                                                    modifier = Modifier.clickable(onClick = onShowMediaInfo)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = fgColor.copy(alpha = 0.18f),
+                                        modifier = Modifier.clickable(onClick = onCycleVoiceSpeed)
+                                    ) {
+                                        Text(
+                                            text = "${playbackState.speed}x",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = fgColor,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = onDownloadMedia,
+                                        enabled = !isDownloading,
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isSavedToDevice) Icons.Rounded.CloudDone else Icons.Rounded.Download,
+                                            contentDescription = "Download Voice Note",
+                                            tint = fgColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
-                                Spacer(Modifier.width(6.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    LinearProgressIndicator(
-                                        progress = {
-                                            if (playbackState.activeUrl == message.mediaUrl) playbackState.progressFraction else 0f
-                                        },
-                                        color = fgColor,
-                                        trackColor = fgColor.copy(alpha = 0.25f)
-                                    )
-                                    Text(
-                                        text = "${(message.durationMs / 1000L).coerceAtLeast(1)}s voice note",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = fgColor.copy(alpha = 0.85f)
-                                    )
-                                }
-                                Spacer(Modifier.width(6.dp))
+                            } else {
                                 Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = fgColor.copy(alpha = 0.18f),
-                                    modifier = Modifier.clickable(onClick = onCycleVoiceSpeed)
+                                    color = fgColor.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(onClick = onShowMediaInfo)
                                 ) {
-                                    Text(
-                                        text = "${playbackState.speed}x",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = fgColor,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
+                                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.CloudOff, contentDescription = "Unavailable", tint = fgColor.copy(alpha = 0.78f))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = if (availabilityState == MediaAvailabilityState.BACKUP_ONLY) {
+                                                "Voice note available in Backup"
+                                            } else {
+                                                "Voice note unavailable (7-day expired)"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = fgColor
+                                        )
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(4.dp))
@@ -1411,12 +1654,15 @@ private fun MessageBubbleItem(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onOpenDocument(message.mediaUrl) }
+                                    .clickable {
+                                        if (resolvedMediaUri.isNotBlank()) onOpenDocument(resolvedMediaUri)
+                                        else onShowMediaInfo()
+                                    }
                             ) {
                                 Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Rounded.Description, contentDescription = "Document", tint = fgColor)
                                     Spacer(Modifier.width(8.dp))
-                                    Column {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = message.fileName.ifBlank { "Attachment" },
                                             style = MaterialTheme.typography.bodySmall,
@@ -1425,10 +1671,24 @@ private fun MessageBubbleItem(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "${(message.fileSizeBytes / 1024L).coerceAtLeast(1)} KB",
+                                            text = if (resolvedMediaUri.isNotBlank()) {
+                                                "${(message.fileSizeBytes / 1024L).coerceAtLeast(1)} KB"
+                                            } else {
+                                                "Unavailable after 7 days"
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
                                             color = fgColor.copy(alpha = 0.78f)
                                         )
+                                    }
+                                    if (resolvedMediaUri.isNotBlank()) {
+                                        IconButton(onClick = onDownloadMedia, modifier = Modifier.size(30.dp)) {
+                                            Icon(
+                                                imageVector = if (isSavedToDevice) Icons.Rounded.CloudDone else Icons.Rounded.Download,
+                                                contentDescription = "Save Document",
+                                                tint = fgColor,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1488,15 +1748,28 @@ private fun MessageBubbleItem(
                         if (message.editedAt != null) {
                             Text("edited", style = MaterialTheme.typography.labelSmall, color = fgColor.copy(alpha = 0.72f))
                         }
-                        Text(timeText, style = MaterialTheme.typography.labelSmall, color = fgColor.copy(alpha = 0.78f))
+                        Text(
+                            text = if (isPendingOffline) "Queued" else timeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = fgColor.copy(alpha = 0.78f)
+                        )
                         if (isMine) {
-                            val readByOthers = message.readBy.any { it != currentUserId }
-                            Icon(
-                                imageVector = Icons.Rounded.DoneAll,
-                                contentDescription = "Receipt",
-                                tint = if (readByOthers) Color(0xFF6EE7B7) else fgColor.copy(alpha = 0.78f),
-                                modifier = Modifier.size(14.dp)
-                            )
+                            if (isPendingOffline) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Schedule,
+                                    contentDescription = "Queued offline",
+                                    tint = fgColor.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            } else {
+                                val readByOthers = message.readBy.any { it != currentUserId }
+                                Icon(
+                                    imageVector = Icons.Rounded.DoneAll,
+                                    contentDescription = "Receipt",
+                                    tint = if (readByOthers) Color(0xFF6EE7B7) else fgColor.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                         }
                     }
                 }

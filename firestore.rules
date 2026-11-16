@@ -192,8 +192,13 @@ service cloud.firestore {
              data.memberUids is list && data.memberUids.size() <= 100 &&
              data.isPublic is bool &&
              isOptString(data, 'text', 8000) &&
-             isOptString(data, 'mediaUrl', 1000) &&
-             data.mediaType in ['text', 'image', 'video', 'voice', 'document', 'poll', 'sticker'] &&
+             isOptString(data, 'mediaUrl', 1500) &&
+             isOptString(data, 'mediaId', 128) &&
+             isOptString(data, 'mediaThumbnailUrl', 1500) &&
+             isOptInt(data, 'mediaExpiresAt') &&
+             isOptBool(data, 'mediaExpired') &&
+             data.mediaType in ['text', 'image', 'voice', 'document', 'poll', 'sticker'] &&
+             (!('mimeType' in data) || !(data.mimeType is string) || !data.mimeType.matches('(?i)^video/.*')) &&
              isOptString(data, 'fileName', 256) &&
              isOptInt(data, 'fileSizeBytes') &&
              isOptString(data, 'mimeType', 128) &&
@@ -245,7 +250,7 @@ service cloud.firestore {
              data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
              isOptString(data, 'authorAvatarUrl', 1000) &&
              isOptString(data, 'mediaUrl', 1000) &&
-             data.mediaType in ['text', 'image', 'video'] &&
+             data.mediaType in ['text', 'image'] &&
              isOptString(data, 'caption', 500) &&
              isOptString(data, 'backgroundGradient', 64) &&
              data.privacy in ['public', 'followers', 'close_friends', 'custom'] &&
@@ -545,7 +550,8 @@ service cloud.firestore {
                            (existing().senderId == request.auth.uid &&
                             incoming().diff(existing()).affectedKeys().hasOnly([
                               'text', 'editedAt', 'isDeleted', 'isPinned', 'reactions',
-                              'readBy', 'deliveredTo', 'pollVotes', 'updatedAt'
+                              'readBy', 'deliveredTo', 'pollVotes', 'mediaExpired', 'mediaUrl',
+                              'mediaThumbnailUrl', 'updatedAt'
                             ])) ||
                            ((request.auth.uid in existing().memberUids || existing().isPublic == true) &&
                             incoming().diff(existing()).affectedKeys().hasOnly([

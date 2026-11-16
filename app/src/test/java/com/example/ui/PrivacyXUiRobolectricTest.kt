@@ -182,17 +182,17 @@ class PrivacyXUiRobolectricTest {
         assertEquals("john_doe", AuthRepository.normalizeUsername("@John_Doe"))
         assertTrue(AuthRepository.isValidUsernameFormat("john_doe99"))
         assertFalse(AuthRepository.isValidUsernameFormat("ab"))
-        assertEquals("", AppConstants.cleanSecret("MY_CLOUDINARY_CLOUD_NAME"))
-        assertEquals("demo_cloud", AppConstants.cleanSecret("demo_cloud"))
+        assertEquals("", AppConstants.cleanSecret("MY_SUPABASE_URL"))
+        assertEquals("https://demo.supabase.co", AppConstants.cleanSecret("https://demo.supabase.co"))
     }
 
     @Test
-    fun cloudinaryMediaService_validatesFileM4aVoiceUriAsAudioMp4() {
+    fun supabaseMediaService_validatesFileM4aVoiceUriAsAudioMp4() {
         val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
         val tempFile = java.io.File(context.cacheDir, "test_voice_${System.currentTimeMillis()}.m4a")
         tempFile.writeBytes(byteArrayOf(0x00, 0x01, 0x02, 0x03, 0x04))
         try {
-            val service = com.example.media.CloudinaryMediaService(context)
+            val service = com.example.media.SupabaseMediaService(context)
             val result = service.validateUri(android.net.Uri.fromFile(tempFile))
             assertTrue("Expected .m4a file URI to validate cleanly: ${result.exceptionOrNull()}", result.isSuccess)
             val validated = result.getOrThrow()
