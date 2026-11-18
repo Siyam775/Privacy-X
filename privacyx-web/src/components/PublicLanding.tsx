@@ -21,9 +21,10 @@ export function PublicLanding() {
           <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-pink-500 text-white shadow-lg sm:h-10 sm:w-10"><LockKeyhole size={19} /></span>
           <span className="text-base min-[380px]:text-lg">PrivacyX</span>
         </a>
-        <nav className="flex items-center gap-4 sm:gap-7" aria-label="Main navigation">
+        <nav className="flex items-center gap-2 min-[380px]:gap-4 sm:gap-7" aria-label="Main navigation">
           <a href="#features" className="hidden text-sm font-medium text-[var(--px-text-secondary)] transition hover:text-violet-600 sm:inline">Features</a>
           <a href="#privacy" className="hidden text-sm font-medium text-[var(--px-text-secondary)] transition hover:text-violet-600 sm:inline">Privacy</a>
+          <Link href="/signup?mode=signin" className="shrink-0 rounded-full border border-[var(--px-border)] bg-white/70 px-3 py-2 text-xs font-semibold text-[var(--px-text-primary)] transition hover:bg-white dark:bg-white/5 dark:hover:bg-white/10 min-[380px]:px-4 min-[380px]:text-sm">Sign in</Link>
           <Link href="/signup" className="shrink-0 rounded-full bg-violet-600 px-3 py-2.5 text-xs font-semibold text-white shadow-md transition hover:bg-violet-700 min-[380px]:px-4 min-[380px]:text-sm">Create account</Link>
         </nav>
       </header>
@@ -35,7 +36,8 @@ export function PublicLanding() {
           <p className="mt-6 max-w-xl text-lg leading-8 text-[var(--px-text-secondary)]">Private chats, calls, stories, and communities come together in one thoughtfully designed space.</p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link href="/signup" className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-6 py-3.5 font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-violet-700">Get started <ArrowRight size={18} /></Link>
-            <a href="#features" className="rounded-full border border-[var(--px-border)] bg-white/60 px-6 py-3.5 font-semibold transition hover:bg-white/90 dark:bg-white/5 dark:hover:bg-white/10">Explore features</a>
+            <Link href="/signup?mode=signin" className="rounded-full border border-[var(--px-border)] bg-white/70 px-6 py-3.5 font-semibold transition hover:bg-white dark:bg-white/5 dark:hover:bg-white/10">Sign in</Link>
+            <a href="#features" className="rounded-full px-4 py-3.5 text-sm font-semibold text-[var(--px-text-secondary)] transition hover:text-violet-600">Explore features</a>
           </div>
           <p className="mt-5 text-sm text-[var(--px-text-muted)]">See what PrivacyX offers before creating an account.</p>
         </div>

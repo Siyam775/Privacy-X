@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { auth, signOut as firebaseSignOut } from "@/lib/firebase";
 import { supabaseMediaService } from "@/services/supabaseMediaService";
 import { AuthRepository } from "@/services/authRepository";
 import { SocialRepository } from "@/services/socialRepository";
-import { useAuthStore, useThemeStore } from "@/stores/index";
+import { useAuthStore, useChatStore, useThemeStore } from "@/stores/index";
 import { UserAvatar, GlassCard, ToggleSwitch } from "@/components/ui";
 import type { AppThemeId, AppearanceMode, BlockEdge, UserSession } from "@/types/index";
 import { cn } from "@/lib/utils";
@@ -98,8 +97,10 @@ export default function ProfilePage() {
   };
 
   const handleSignOut = async () => {
-    await firebaseSignOut(auth);
+    await authRepo.signOut();
     clearAuthStore();
+    useChatStore.getState().clearChat();
+    router.replace("/signup?mode=signin");
   };
 
   const handleExportData = async () => {
@@ -121,8 +122,10 @@ export default function ProfilePage() {
     if (!confirm("Are you sure you want to delete your account? This cannot be undone.")) return;
     const result = await authRepo.deleteAccount();
     if (result.success) {
-      await firebaseSignOut(auth);
+      await authRepo.signOut().catch(() => undefined);
       clearAuthStore();
+      useChatStore.getState().clearChat();
+      router.replace("/signup");
     } else {
       alert(result.error || "Delete failed");
     }

@@ -52,8 +52,8 @@ export default function SocialPage() {
       }
 
       const result = await socialRepo.createPost({
-        authorName: user!.displayName || "User",
-        authorAvatarUrl: user!.photoUrl || "",
+        authorName: user?.displayName || "User",
+        authorAvatarUrl: user?.photoUrl || "",
         caption: postCaption,
         mediaUrl,
         collectionTag,
@@ -78,7 +78,7 @@ export default function SocialPage() {
   const addComment = async (postId: string) => {
     const text = prompt("Add a comment:");
     if (text) {
-      const result = await socialRepo.addPostComment(postId, user!.displayName || "User", text);
+      const result = await socialRepo.addPostComment(postId, user?.displayName || "User", text);
       if (!result.success) setError(result.error || "Could not add comment.");
     }
   };

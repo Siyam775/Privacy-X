@@ -568,5 +568,5 @@ export class MessagingRepository {
 }
 
 function authCurrentUserId(): string | null {
-  return auth.currentUser?.uid ?? null;
+  return auth?.currentUser?.uid ?? null;
 }

@@ -13,9 +13,6 @@ const nextConfig: NextConfig = {
   basePath: githubPagesBasePath,
   trailingSlash: true,
   images: { unoptimized: true },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;

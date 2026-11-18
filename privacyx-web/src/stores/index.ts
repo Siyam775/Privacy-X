@@ -78,7 +78,7 @@ export const useAuthStore = create<AuthState>()(
     {
       name: "privacyx_auth",
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ user: state.user, settings: state.settings }),
+      partialize: (state) => ({ settings: state.settings }),
     }
   )
 );

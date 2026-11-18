@@ -2,15 +2,20 @@
 import { getErrorMessage, normalizeFirestoreValue } from "@/lib/utils";
 import type { DocumentData } from "firebase/firestore";
 
-import {
-  GoogleAuthProvider,
-  signInWithPopup,
-  signOut,
-  type UserInfo,
-} from "firebase/auth";
+import type { UserInfo } from "firebase/auth";
 import {
   auth,
   db,
+  authPersistenceReady,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+  signOut as firebaseSignOut,
   doc,
   collection,
   runTransaction,
@@ -35,27 +40,75 @@ import {
   SavedMessage,
 } from "@/types/index";
 
-const normalizeUsername = (raw: string): string =>
+export const normalizeUsername = (raw: string): string =>
   raw.trim().toLowerCase().replace(/^@/, "").replace(/[^a-z0-9_]/g, "");
 
-const isValidUsernameFormat = (username: string): boolean =>
+export const isValidUsernameFormat = (username: string): boolean =>
   username.length >= 3 && username.length <= 30 && /^[a-z0-9_]+$/.test(username);
 
+export const validateEmailAddress = (email: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+export function mapFirebaseAuthError(err: unknown, fallback = "Authentication failed. Please try again."): string {
+  const code =
+    typeof err === "object" && err !== null && "code" in err && typeof (err as { code?: unknown }).code === "string"
+      ? (err as { code: string }).code
+      : "";
+
+  switch (code) {
+    case "auth/email-already-in-use":
+      return "An account with this email already exists. Try signing in instead.";
+    case "auth/invalid-email":
+      return "Please enter a valid email address.";
+    case "auth/weak-password":
+      return "Password must be at least 6 characters long.";
+    case "auth/invalid-credential":
+    case "auth/wrong-password":
+    case "auth/user-not-found":
+      return "Incorrect email or password. Please check your credentials and try again.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Please wait a moment and try again.";
+    case "auth/popup-blocked":
+      return "Popup was blocked by your browser. Redirecting to Google sign-in…";
+    case "auth/popup-closed-by-user":
+    case "auth/cancelled-popup-request":
+      return "Google sign-in was cancelled. Please try again.";
+    case "auth/unauthorized-domain":
+      return "This domain is not yet added to Firebase Authentication Authorized Domains.";
+    case "auth/operation-not-allowed":
+      return "This sign-in method is not enabled in Firebase Authentication yet.";
+    case "auth/account-exists-with-different-credential":
+      return "An account already exists with this email using a different sign-in method.";
+    case "auth/network-request-failed":
+      return "Network error while contacting Firebase Authentication. Please check your connection.";
+    case "auth/user-disabled":
+      return "This account has been disabled.";
+    case "auth/user-token-expired":
+    case "auth/requires-recent-login":
+      return "Your session expired. Please sign in again.";
+    default:
+      return getErrorMessage(err, fallback);
+  }
+}
+
 export class AuthRepository {
-  private dbRef = db;
+  private get dbRef() {
+    return db;
+  }
 
   get currentUserId(): string | null {
-    return auth.currentUser?.uid ?? null;
+    return auth?.currentUser?.uid ?? null;
   }
 
   get currentUser(): UserProfile | null {
-    return auth.currentUser
+    const firebaseUser = auth?.currentUser;
+    return firebaseUser
       ? {
-          id: auth.currentUser.uid,
-          userId: auth.currentUser.uid,
-          username: auth.currentUser.displayName || "",
-          displayName: auth.currentUser.displayName || "User",
-          photoUrl: auth.currentUser.photoURL || "",
+          id: firebaseUser.uid,
+          userId: firebaseUser.uid,
+          username: firebaseUser.displayName || "",
+          displayName: firebaseUser.displayName || "User",
+          photoUrl: firebaseUser.photoURL || "",
           bio: "",
           statusText: "Available",
           isOnline: true,
@@ -70,25 +123,151 @@ export class AuthRepository {
   }
 
   observeAuthState(callback: (user: UserInfo | null) => void) {
+    if (!auth) return () => {};
     return auth.onAuthStateChanged(callback);
   }
 
-  async signInWithGoogle(): Promise<{ user: UserInfo | null; error: Error | null }> {
+  async signInWithGoogle(): Promise<{ user: UserInfo | null; redirected?: boolean; error: Error | null }> {
+    if (!auth) {
+      return { user: null, error: new Error("Firebase Authentication is not initialized.") };
+    }
     try {
+      await authPersistenceReady;
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
       const result = await signInWithPopup(auth, provider);
-      return { user: result.user, error: null };
+      return { user: result.user, redirected: false, error: null };
     } catch (e) {
-      return { user: null, error: e instanceof Error ? e : new Error(getErrorMessage(e)) };
+      const code =
+        typeof e === "object" && e !== null && "code" in e && typeof (e as { code?: unknown }).code === "string"
+          ? (e as { code: string }).code
+          : "";
+      if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
+        try {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: "select_account" });
+          await signInWithRedirect(auth, provider);
+          return { user: null, redirected: true, error: null };
+        } catch (redirectError) {
+          return { user: null, redirected: false, error: new Error(mapFirebaseAuthError(redirectError)) };
+        }
+      }
+      return { user: null, redirected: false, error: new Error(mapFirebaseAuthError(e, "Google sign-in failed.")) };
+    }
+  }
+
+  async signInWithGoogleRedirect(): Promise<{ redirected: boolean; error: Error | null }> {
+    if (!auth) {
+      return { redirected: false, error: new Error("Firebase Authentication is not initialized.") };
+    }
+    try {
+      await authPersistenceReady;
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithRedirect(auth, provider);
+      return { redirected: true, error: null };
+    } catch (e) {
+      return { redirected: false, error: new Error(mapFirebaseAuthError(e, "Google redirect failed.")) };
+    }
+  }
+
+  async consumeGoogleRedirectResult(): Promise<{ user: UserInfo | null; error: string | null }> {
+    if (!auth) return { user: null, error: null };
+    try {
+      await authPersistenceReady;
+      const result = await getRedirectResult(auth);
+      return { user: result?.user ?? null, error: null };
+    } catch (e) {
+      return { user: null, error: mapFirebaseAuthError(e, "Google sign-in could not be completed.") };
+    }
+  }
+
+  async registerWithEmail(params: {
+    displayName: string;
+    email: string;
+    password: string;
+  }): Promise<{ user: UserInfo | null; error: string | null }> {
+    if (!auth) {
+      return { user: null, error: "Firebase Authentication is not initialized." };
+    }
+    const trimmedName = params.displayName.trim();
+    const normalizedEmail = params.email.trim();
+    if (trimmedName.length < 2 || trimmedName.length > 60) {
+      return { user: null, error: "Display name must be between 2 and 60 characters." };
+    }
+    if (!validateEmailAddress(normalizedEmail)) {
+      return { user: null, error: "Please enter a valid email address." };
+    }
+    if (params.password.length < 6) {
+      return { user: null, error: "Password must be at least 6 characters long." };
+    }
+
+    try {
+      await authPersistenceReady;
+      const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, params.password);
+      await updateProfile(cred.user, { displayName: trimmedName }).catch(() => undefined);
+      return { user: cred.user, error: null };
+    } catch (e) {
+      return { user: null, error: mapFirebaseAuthError(e, "Could not create your account.") };
+    }
+  }
+
+  async signInWithEmail(params: {
+    email: string;
+    password: string;
+  }): Promise<{ user: UserInfo | null; error: string | null }> {
+    if (!auth) {
+      return { user: null, error: "Firebase Authentication is not initialized." };
+    }
+    const normalizedEmail = params.email.trim();
+    if (!validateEmailAddress(normalizedEmail)) {
+      return { user: null, error: "Please enter a valid email address." };
+    }
+    if (!params.password) {
+      return { user: null, error: "Please enter your password." };
+    }
+
+    try {
+      await authPersistenceReady;
+      const cred = await signInWithEmailAndPassword(auth, normalizedEmail, params.password);
+      return { user: cred.user, error: null };
+    } catch (e) {
+      return { user: null, error: mapFirebaseAuthError(e, "Sign in failed.") };
+    }
+  }
+
+  async sendPasswordReset(email: string): Promise<{ success: boolean; error: string | null }> {
+    if (!auth) {
+      return { success: false, error: "Firebase Authentication is not initialized." };
+    }
+    const normalizedEmail = email.trim();
+    if (!validateEmailAddress(normalizedEmail)) {
+      return { success: false, error: "Enter a valid email address first to reset your password." };
+    }
+    try {
+      await sendPasswordResetEmail(auth, normalizedEmail);
+      return { success: true, error: null };
+    } catch (e) {
+      return { success: false, error: mapFirebaseAuthError(e, "Could not send password reset email.") };
     }
   }
 
   async signOut(): Promise<void> {
-    await signOut(auth);
+    if (!auth) return;
+    if (this.currentUserId && this.dbRef) {
+      await this.updatePresence(false).catch(() => undefined);
+    }
+    await firebaseSignOut(auth);
   }
 
-  observeUserProfile(userId: string): (callback: (profile: UserProfile | null) => void) => () => void {
-    return (callback) => {
+  observeUserProfile(
+    userId: string
+  ): (callback: (profile: UserProfile | null) => void, onError?: (err: Error) => void) => () => void {
+    return (callback, onError) => {
+      if (!this.dbRef) {
+        callback(null);
+        return () => {};
+      }
       const unsubscribe = onSnapshot(
         doc(this.dbRef, "users", userId),
         (snap) => {
@@ -100,6 +279,7 @@ export class AuthRepository {
         },
         (err) => {
           console.error("Firestore error:", err);
+          onError?.(err instanceof Error ? err : new Error(getErrorMessage(err)));
         }
       );
       return unsubscribe;
@@ -154,12 +334,37 @@ export class AuthRepository {
     };
   }
 
-  async isUsernameAvailable(rawUsername: string): Promise<boolean> {
+  async checkUsernameAvailability(rawUsername: string): Promise<{
+    username: string;
+    valid: boolean;
+    available: boolean | null;
+    error: string | null;
+  }> {
     const normalized = normalizeUsername(rawUsername);
-    if (!isValidUsernameFormat(normalized)) return false;
-    const docRef = doc(this.dbRef, "usernames", normalized);
-    const snap = await getDoc(docRef);
-    return !snap.exists();
+    if (!isValidUsernameFormat(normalized)) {
+      return { username: normalized, valid: false, available: false, error: null };
+    }
+    if (!this.dbRef) {
+      return { username: normalized, valid: true, available: null, error: "Database connection unavailable." };
+    }
+    try {
+      const docRef = doc(this.dbRef, "usernames", normalized);
+      const snap = await getDoc(docRef);
+      const available = !snap.exists() || snap.data()?.userId === this.currentUserId;
+      return { username: normalized, valid: true, available, error: null };
+    } catch (e) {
+      return {
+        username: normalized,
+        valid: true,
+        available: null,
+        error: getErrorMessage(e, "Could not verify username availability."),
+      };
+    }
+  }
+
+  async isUsernameAvailable(rawUsername: string): Promise<boolean> {
+    const result = await this.checkUsernameAvailability(rawUsername);
+    return result.valid && result.available === true;
   }
 
   async claimUsernameAndCreateProfile(params: {
@@ -171,13 +376,14 @@ export class AuthRepository {
   }): Promise<{ success: boolean; error: string | null }> {
     const uid = this.currentUserId;
     if (!uid) return { success: false, error: "User must be signed in." };
+    if (!this.dbRef) return { success: false, error: "Database connection is not ready." };
 
     const username = normalizeUsername(params.username);
     if (!isValidUsernameFormat(username)) {
       return { success: false, error: "Username must be 3-30 lowercase letters, numbers, or underscores." };
     }
 
-    const safeDisplayName = params.displayName.trim() || username;
+    const safeDisplayName = (params.displayName.trim() || username).slice(0, 60);
     const userRef = doc(this.dbRef, "users", uid);
     const usernameRef = doc(this.dbRef, "usernames", username);
     const privateRef = doc(this.dbRef, "users", uid, "private", "account");
@@ -202,7 +408,7 @@ export class AuthRepository {
         });
 
         if (oldUsername && oldUsername !== username) {
-          await tx.delete(doc(this.dbRef, "usernames", oldUsername));
+          tx.delete(doc(this.dbRef, "usernames", oldUsername));
         }
 
         const profileData: DocumentData = {
@@ -263,6 +469,9 @@ export class AuthRepository {
         );
       });
 
+      if (auth?.currentUser && auth.currentUser.displayName !== safeDisplayName) {
+        await updateProfile(auth.currentUser, { displayName: safeDisplayName }).catch(() => undefined);
+      }
       await this.registerCurrentSession(uid);
       return { success: true, error: null };
     } catch (e) {
@@ -362,16 +571,18 @@ export class AuthRepository {
 
   async registerCurrentSession(uid?: string): Promise<void> {
     const targetUid = uid || this.currentUserId;
-    if (!targetUid) return;
+    if (!targetUid || !this.dbRef) return;
     const sessionId = `web_session_${Date.now()}`;
     const docRef = doc(this.dbRef, "users", targetUid, "sessions", sessionId);
+    const rawPlatform = typeof navigator !== "undefined" ? navigator.platform || "Browser" : "Browser";
+    const platform = `Web ${rawPlatform}`.trim().slice(0, 40) || "Web Browser";
     try {
       await setDoc(
         docRef,
         {
           userId: targetUid,
           deviceName: "Web Browser",
-          platform: `Web ${navigator.platform}`,
+          platform,
           isActive: true,
           lastActiveAt: serverTimestamp(),
           createdAt: serverTimestamp(),

@@ -128,7 +128,7 @@ export class SupabaseMediaService {
   }
 
   private async getIdToken(): Promise<string> {
-    const user = auth.currentUser;
+    const user = auth?.currentUser;
     if (!user) throw new Error("Sign in required before uploading media.");
     return user.getIdToken(false);
   }
@@ -205,7 +205,7 @@ export class SupabaseMediaService {
     mimeType: string,
     expiresAtMs: number
   ) {
-    const uid = auth.currentUser?.uid;
+    const uid = auth?.currentUser?.uid;
     if (!uid) throw new Error("User must be signed in.");
     const safeConv = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_") || "personal";
     const ext = file.name.split(".").pop() || "webp";

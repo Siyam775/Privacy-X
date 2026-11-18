@@ -55,8 +55,8 @@ export default function StoriesPage() {
       }
 
       const result = await socialRepo.createStory({
-        authorName: user!.displayName || "User",
-        authorAvatarUrl: user!.photoUrl || "",
+        authorName: user?.displayName || "User",
+        authorAvatarUrl: user?.photoUrl || "",
         caption: storyCaption,
         mediaType,
         mediaUrl,
@@ -212,9 +212,9 @@ export default function StoriesPage() {
                 tabIndex={0}
                 onClick={() => {
                   setSelectedStory(story);
-                  socialRepo.recordStoryView(story, user!.displayName || "User");
+                  socialRepo.recordStoryView(story, user?.displayName || "User");
                 }}
-                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedStory(story); void socialRepo.recordStoryView(story, user!.displayName || "User"); } }}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedStory(story); void socialRepo.recordStoryView(story, user?.displayName || "User"); } }}
                 className="group cursor-pointer"
               >
                 <div className="relative">

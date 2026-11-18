@@ -3,12 +3,24 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  connectAuthEmulator,
   signOut,
   onAuthStateChanged,
+  onIdTokenChanged,
 } from "firebase/auth";
 import {
   getFirestore,
   Firestore,
+  connectFirestoreEmulator,
   doc,
   collection,
   query,
@@ -33,52 +45,108 @@ import {
 } from "firebase/firestore";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
+const PUBLIC_FIREBASE_DEFAULTS = {
+  apiKey: "AIzaSyCLmUK0dvsXGCHK6-8YroGGSQm4-S9an_I",
+  authDomain: "privacy-x.firebaseapp.com",
+  projectId: "privacy-x",
+  storageBucket: "privacy-x.firebasestorage.app",
+  messagingSenderId: "891277106805",
+} as const;
 
 const isFirebaseSettingConfigured = (value: string | undefined) => {
   const setting = value?.trim().toLowerCase();
-  return Boolean(setting && !setting.startsWith("my_") && !setting.includes("your-"));
+  return Boolean(
+    setting &&
+      !setting.startsWith("my_") &&
+      !setting.startsWith("your_") &&
+      !setting.includes("your-")
+  );
+};
+
+const pickFirebaseSetting = (envValue: string | undefined, fallback = ""): string =>
+  isFirebaseSettingConfigured(envValue) ? envValue!.trim() : fallback;
+
+const configuredAppId = pickFirebaseSetting(process.env.NEXT_PUBLIC_FIREBASE_APP_ID);
+const configuredRecaptchaSiteKey = pickFirebaseSetting(process.env.NEXT_PUBLIC_FIREBASE_RECAPTCHA_SITE_KEY);
+
+const firebaseConfig = {
+  apiKey: pickFirebaseSetting(process.env.NEXT_PUBLIC_FIREBASE_API_KEY, PUBLIC_FIREBASE_DEFAULTS.apiKey),
+  authDomain: pickFirebaseSetting(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, PUBLIC_FIREBASE_DEFAULTS.authDomain),
+  projectId: pickFirebaseSetting(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, PUBLIC_FIREBASE_DEFAULTS.projectId),
+  storageBucket: pickFirebaseSetting(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET, PUBLIC_FIREBASE_DEFAULTS.storageBucket),
+  messagingSenderId: pickFirebaseSetting(
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    PUBLIC_FIREBASE_DEFAULTS.messagingSenderId
+  ),
+  ...(configuredAppId ? { appId: configuredAppId } : {}),
 };
 
 export const firebaseConfigured = [
   firebaseConfig.apiKey,
   firebaseConfig.authDomain,
   firebaseConfig.projectId,
-  firebaseConfig.appId,
 ].every(isFirebaseSettingConfigured);
 
 let app: FirebaseApp;
 let db: Firestore;
 let auth: ReturnType<typeof getAuth>;
+let authPersistenceReady: Promise<void> = Promise.resolve();
 
 if (typeof window !== "undefined" && firebaseConfigured) {
-  if (getApps().length === 0) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApps()[0];
-  }
+  const isNewApp = getApps().length === 0;
+  app = isNewApp ? initializeApp(firebaseConfig) : getApps()[0];
   auth = getAuth(app);
-  db = getFirestore(app, process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID || "ai-studio-android-privacyx-5767d797-31a9-488e-9a25-d28909171c2e");
+  db = getFirestore(
+    app,
+    pickFirebaseSetting(
+      process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID,
+      "ai-studio-android-privacyx-5767d797-31a9-488e-9a25-d28909171c2e"
+    )
+  );
 
-  // Initialize App Check with reCAPTCHA v3 (web equivalent of Android App Check)
-  try {
-    initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider(process.env.NEXT_PUBLIC_FIREBASE_RECAPTCHA_SITE_KEY || ""),
-      isTokenAutoRefreshEnabled: true,
-    });
-  } catch {
-    // App Check already initialized
+  if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true" && isNewApp) {
+    try {
+      connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+      connectFirestoreEmulator(db, "127.0.0.1", 8085);
+    } catch {
+      // Emulator already connected
+    }
+  }
+
+  authPersistenceReady = setPersistence(auth, browserLocalPersistence)
+    .catch(() => setPersistence(auth, browserSessionPersistence))
+    .catch(() => undefined);
+
+  // Only initialize App Check when both a real reCAPTCHA site key and a Web App ID are configured.
+  if (configuredRecaptchaSiteKey && configuredAppId) {
+    try {
+      initializeAppCheck(app, {
+        provider: new ReCaptchaV3Provider(configuredRecaptchaSiteKey),
+        isTokenAutoRefreshEnabled: true,
+      });
+    } catch {
+      // App Check already initialized
+    }
   }
 }
 
-export { app, auth, db, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged };
+export {
+  app,
+  auth,
+  db,
+  authPersistenceReady,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+  signOut,
+  onAuthStateChanged,
+  onIdTokenChanged,
+};
 export {
   doc,
   collection,

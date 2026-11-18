@@ -135,8 +135,15 @@ export default function CallsPage() {
       await pc.setLocalDescription(offer);
       await waitForIceGathering(pc);
 
+      const callerId = user?.userId;
+      if (!callerId) {
+        pc.close();
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error("Sign in required before starting a call.");
+      }
+
       const result = await callRepo.createOutgoingCall({
-        callerName: user!.displayName || "User",
+        callerName: user?.displayName || "User",
         participantIds: [target.userId],
         conversationId: "direct_call",
         callType: isVideo ? "video" : "voice",
@@ -146,8 +153,8 @@ export default function CallsPage() {
       if (result.success) {
         setCallDuration(0);
         const outgoingCall = {
-          id: result.callId!, callerId: user!.userId, callerName: user!.displayName || "User",
-          conversationId: "direct_call", participantIds: [user!.userId, target.userId],
+          id: result.callId!, callerId, callerName: user?.displayName || "User",
+          conversationId: "direct_call", participantIds: [callerId, target.userId],
           callType: isVideo ? "video" as const : "voice" as const, status: "ringing" as const,
           offerSdp: pc.localDescription?.sdp || offer.sdp || "", answerSdp: "", durationSeconds: 0,
         };

@@ -178,8 +178,8 @@ function ChatDetailPageContent() {
 
     const result = await messagingRepo.sendMessage({
       conversation: activeConversation,
-      senderName: user!.displayName || "User",
-      senderAvatarUrl: user!.photoUrl || "",
+      senderName: user?.displayName || "User",
+      senderAvatarUrl: user?.photoUrl || "",
       text: inputText.trim(),
       customMessageId: clientMsgId,
       replyToId: replyTo?.id || "",
@@ -206,8 +206,8 @@ function ChatDetailPageContent() {
 
         await messagingRepo.sendMessage({
           conversation: activeConversation,
-          senderName: user!.displayName || "User",
-          senderAvatarUrl: user!.photoUrl || "",
+          senderName: user?.displayName || "User",
+          senderAvatarUrl: user?.photoUrl || "",
           text: "",
           mediaType,
           mediaUrl: result.secureUrl,
@@ -267,8 +267,8 @@ function ChatDetailPageContent() {
             const clientMsgId = `msg_${Math.random().toString(36).slice(2, 20)}`;
             await messagingRepo.sendMessage({
               conversation: activeConversation,
-              senderName: user!.displayName || "User",
-              senderAvatarUrl: user!.photoUrl || "",
+              senderName: user?.displayName || "User",
+              senderAvatarUrl: user?.photoUrl || "",
               text: "",
               mediaType: "voice",
               mediaUrl: result.secureUrl,
@@ -590,7 +590,7 @@ function ChatDetailPageContent() {
                 <div className="flex items-center justify-between mt-2 pt-2 border-t border-current/20">
                   <span className="text-[10px] text-current/60">{formatMessageTime(msg.createdAt)}</span>
                   <div className="flex items-center gap-1">
-                    {msg.readBy.includes(user!.userId) ? (
+                    {Boolean(user && msg.readBy.includes(user.userId)) ? (
                       <span className="text-[10px] text-blue-500">✓✓</span>
                     ) : (
                       <span className="text-[10px] text-[var(--px-text-muted)]">✓</span>
