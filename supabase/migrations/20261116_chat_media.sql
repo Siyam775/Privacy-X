@@ -65,19 +65,24 @@ create index if not exists idx_media_objects_owner
 
 alter table public.media_objects enable row level security;
 
--- Lock down direct anon/authenticated access: all access goes through verified Firebase ID Token bridge (service_role).
+-- Lock down direct anon/authenticated access: AS RESTRICTIVE ensures no other permissive policy can bypass this lock.
 drop policy if exists "Deny all anon media_objects" on public.media_objects;
-create policy "Deny all anon media_objects"
+drop policy if exists "Restrict direct media_objects access" on public.media_objects;
+create policy "Restrict direct media_objects access"
   on public.media_objects
+  as restrictive
   for all
   to anon, authenticated
   using (false)
   with check (false);
 
 -- Ensure storage.objects inside chat-media cannot be read/written directly without signed URLs.
+-- Uses AS RESTRICTIVE so it never opens other buckets and blocks chat-media even if other permissive policies exist.
 drop policy if exists "Deny direct chat-media access" on storage.objects;
-create policy "Deny direct chat-media access"
+drop policy if exists "Restrict direct chat-media access" on storage.objects;
+create policy "Restrict direct chat-media access"
   on storage.objects
+  as restrictive
   for all
   to anon, authenticated
   using (bucket_id <> 'chat-media')
