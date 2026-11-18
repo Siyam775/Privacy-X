@@ -25,6 +25,11 @@ All Firestore documents reside in named database `ai-studio-android-privacyx-576
 - **`cached_messages`**: Offline message cache indexed by `messageId`, `conversationId`, `createdAtMs`, and `syncState` (`SYNCED`, `PENDING`, `FAILED`).
 - **`pending_outgoing_messages`**: Offline outbox queue with deterministic `clientMessageId`, `conversationId`, `payloadJson`, `localAttachmentPath`, `retryCount`, and `status`.
 
-## 3. Supabase PostgreSQL (`media_objects` & `chat-media` bucket)
-- Private bucket `chat-media` (`public = false`, 25 MB limit, `image/*`, `audio/*`, and document MIME allowlist; `video/*` excluded).
+## 3. Website Browser Storage (IndexedDB via Dexie)
+- **`cachedMessages`** stores the conversation messages received from Firestore for this browser profile.
+- **`mediaFiles`** stores photo blobs in IndexedDB so photos remain available locally after the cloud copy expires.
+- Browser data is device/browser-specific and is not synchronized between browsers.
+
+## 4. Supabase PostgreSQL (`media_objects` & `chat-media` bucket)
+- Private bucket `chat-media` (`public = false`, 25 MB limit, image/audio/video MIME allowlists, and document MIME allowlist). Android chat videos are cloud-only; Android message text and photos are also retained locally.
 - `public.media_objects` stores `media_id`, `object_path`, `thumb_path`, `owner_uid`, `conversation_id`, `category`, `mime_type`, `size_bytes`, `expires_at`, `deleted_from_storage`, `deleted_at` with strict RLS deny-by-default.

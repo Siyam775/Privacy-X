@@ -28,8 +28,8 @@
 - 1:1 Direct Messages, Groups, Communities, Public/Private Channels, and Discussion Topics.
 - Paginated message streams backed by Room (`CachedMessageEntity`) for instant offline loading and `PendingOutgoingMessageEntity` outbox with `ConnectivityManager` auto-flush and deterministic message IDs (`client_...`).
 - Read/delivered receipts, typing indicators, reply/forward/edit/delete/copy/pin/react/bookmark, inline polls with voting, disappearing message timers, scheduled messages, and per-chat draft persistence.
-- Photo Picker (`PickVisualMedia(ImageOnly)`) and SAF (`OpenDocument` with video MIME types blocked), intelligent WebP image compression (Exif fix, <=1600px, 320px WebP thumbnail), real `MediaRecorder`/`MediaPlayer` voice notes (pause/resume/cancel, 1x/1.5x/2x playback), and full-screen pinch-to-zoom image viewer.
-- `SupabaseMediaService` handles verified Firebase ID token exchange with `SUPABASE_MEDIA_BRIDGE_URL`, signed upload/read URLs against private bucket `chat-media`, and strictly enforces **no video uploads in messaging/stories**.
+- Photo and video pickers plus SAF attachment selection, intelligent WebP image compression (Exif fix, <=1600px, 320px WebP thumbnail), real `MediaRecorder`/`MediaPlayer` voice notes (pause/resume/cancel, 1x/1.5x/2x playback), and full-screen pinch-to-zoom image viewer.
+- `SupabaseMediaService` handles verified Firebase ID token exchange with `SUPABASE_MEDIA_BRIDGE_URL` and signed upload/read URLs against private bucket `chat-media`. Chat photos stay locally beside cloud copies; video, voice, and documents upload to cloud.
 - 7-day automatic cloud expiration UI: local-first media resolution (`filesDir/local_media` -> backup indicator -> calm unavailable state), one-tap download saving to internal storage + `MediaStore.Downloads/PrivacyX`, and retention info dialog.
 
 ## 6. Google Drive Backup & Restore (`StorageAndBackupScreen`)

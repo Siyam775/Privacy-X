@@ -499,11 +499,6 @@ class MessagingRepository(private val db: FirebaseFirestore) {
         scheduledDelayMinutes: Long? = null,
         customMessageId: String? = null
     ): Result<String> {
-        if (mediaType.equals("video", ignoreCase = true) || mimeType.startsWith("video/", ignoreCase = true)) {
-            return Result.failure(
-                IllegalArgumentException("Video messaging is disabled. Use photos, voice notes, documents, or WebRTC video calls.")
-            )
-        }
         val uid = requireUserId()
         val msgId = customMessageId?.takeIf { it.isNotBlank() }
             ?: "msg_${UUID.randomUUID().toString().replace("-", "").take(18)}"

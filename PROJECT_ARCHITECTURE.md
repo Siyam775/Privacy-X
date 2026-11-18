@@ -52,8 +52,8 @@ Preferences (`themeId`, `appearanceMode`, `accentColorHex`, `reducedMotion`) per
 Implemented in `RadialFabMenu.kt` using `BoxWithConstraints` responsive arc geometry across 3 concentric rings (12 actions), staggered spring physics, blurred/dimmed tap-blocking backdrop, morphing close button, outside-tap dismissal, `BackHandler` integration, and reduced-motion accessibility fallback.
 
 ## Local-First Media & 7-Day Cloud Retention
-- `SupabaseMediaService` optimizes images (Exif orientation fix, <=1600px, WebP encoding, plus 320px WebP thumbnail), rejects all video uploads in messaging/stories, and exchanges Firebase ID tokens with the backend bridge (`SUPABASE_MEDIA_BRIDGE_URL`) for short-lived signed upload/read URLs.
-- `LocalMediaDatabase` (Room) stores `LocalMediaEntity`, `CachedMessageEntity`, and `PendingOutgoingMessageEntity` to power offline reads, idempotent outgoing message sync, and permanent user downloads in `filesDir/local_media/<conversationId>/` + `MediaStore.Downloads/PrivacyX`.
+- `SupabaseMediaService` optimizes images (Exif orientation fix, <=1600px, WebP encoding, plus 320px WebP thumbnail), uploads Android chat videos to cloud storage, and exchanges Firebase ID tokens with the backend bridge (`SUPABASE_MEDIA_BRIDGE_URL`) for short-lived signed upload/read URLs.
+- `LocalMediaDatabase` (Room) stores cached messages and the offline outbox. Uploaded photos are kept in `filesDir/local_media/<conversationId>/` beside their cloud copies; video, voice, and document staging files are removed after successful upload. Explicit media downloads can still be saved locally.
 - Cloud objects expire after 7 days (`mediaExpiresAt`, `mediaExpired`); expired cloud media gracefully resolves to local saved copies, `"Available in Backup"`, or a calm `"Media unavailable"` state while keeping text intact.
 
 ## Google Drive Backup & Restore

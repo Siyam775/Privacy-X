@@ -15,10 +15,10 @@
   - Room persistence via `LocalMediaDatabase` (`local_media`, `cached_messages`, `pending_outgoing_messages`)
   - `saveMediaToLocal(...)`, `downloadAndSaveMedia(...)` (saves to `filesDir/local_media/<conversationId>/` + `MediaStore.Downloads/PrivacyX`), `resolveMediaState(...)`, `enqueuePendingMessage(...)`, `flushPendingMessages(...)`, `restoreMediaFromBackupZipEntry(...)`, `clearTemporaryCacheOnly()`
 - **`SupabaseMediaService`** (`com.example.media`):
-  - `isConfigured()`, `isBannedVideo(...)`, `optimizeImageToWebpAndThumb(...)`, `uploadOptimizedImage(...)`, `uploadVoiceOrDocument(...)`, `fetchFreshDownloadUrl(...)`
+  - `isConfigured()`, `validateUri(...)`, `optimizeImageToWebpAndThumb(...)`, `uploadMedia(...)`, `cachePhotoLocally(...)`, `fetchFreshDownloadUrl(...)`
 - **`GoogleDriveBackupManager` & `BackupCryptoZip`** (`com.example.backup`):
   - `buildBackupZip(...)`, `uploadBackupToDrive(...)`, `listDriveBackups(...)`, `restoreBackupFromDrive(...)`, `restoreBackupFromLocalUri(...)`, `getPreferencesFlow()`, `updateSchedule(...)`, `updateIncludeMedia(...)`, `updateEncryptedDefault(...)`
-- **`SocialRepository`**, **`CallRepository`**, **`AiAssistantRepository`**, **`AdminRepository`**: Unchanged high-level interfaces; `SocialViewModel` media uploads routed via `SupabaseMediaService` with video disabled.
+- **`SocialRepository`**, **`CallRepository`**, **`AiAssistantRepository`**, **`AdminRepository`**: Unchanged high-level interfaces; chat media uploads route through `SupabaseMediaService`.
 
 ## Supabase Edge Functions (`/supabase/functions`)
 - **`media-bridge`**: Verifies Firebase Auth RS256 ID token via Google JWKS, enforces non-video MIME & 25 MB limits, creates signed upload + 7-day read URLs in private bucket `chat-media`, and tracks expiry in `media_objects`. Actions: `sign_upload`, `sign_download`, `usage`.

@@ -82,17 +82,14 @@ class SupabaseMediaAndBackupTest {
     }
 
     @Test
-    fun validateUri_rejectsVideoFilesWithVideoMessagingDisabledException() {
+    fun validateUri_acceptsVideoFilesForCloudUpload() {
         val videoFile = File(context.cacheDir, "clip_${System.currentTimeMillis()}.mp4")
         videoFile.writeBytes(byteArrayOf(0x00, 0x00, 0x00, 0x18))
         try {
             val service = SupabaseMediaService(context)
             val res = service.validateUri(Uri.fromFile(videoFile))
-            assertTrue(res.isFailure)
-            assertTrue(
-                "Expected VideoMessagingDisabledException, got ${res.exceptionOrNull()}",
-                res.exceptionOrNull() is VideoMessagingDisabledException
-            )
+            assertTrue("Video should validate for cloud upload: ${res.exceptionOrNull()}", res.isSuccess)
+            assertEquals("video", res.getOrThrow().category)
         } finally {
             videoFile.delete()
         }

@@ -229,6 +229,7 @@ fun ChatAttachmentSheetDialog(
     compressImages: Boolean,
     onToggleCompress: (Boolean) -> Unit,
     onPickImage: () -> Unit,
+    onPickVideo: () -> Unit,
     onPickDocument: () -> Unit,
     onCreatePoll: () -> Unit,
     onSetDisappearing: (Long) -> Unit,
@@ -242,6 +243,7 @@ fun ChatAttachmentSheetDialog(
                 Text("Attach & Actions", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(10.dp))
                 PopoverActionRow(Icons.Rounded.Image, "Photo (Photo Picker)", onClick = onPickImage)
+                PopoverActionRow(Icons.Rounded.PlayArrow, "Video (stored in cloud)", onClick = onPickVideo)
                 PopoverActionRow(Icons.Rounded.Description, "Document (PDF, DOC, ZIP, TXT)", onClick = onPickDocument)
                 PopoverActionRow(Icons.Rounded.Poll, "Create Poll", onClick = onCreatePoll)
                 PopoverActionRow(Icons.Rounded.Timer, "Disappearing Message (5 min)", onClick = { onSetDisappearing(5L) })

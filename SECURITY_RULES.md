@@ -15,9 +15,9 @@ Security rules are defined in `firestore.rules` (Firestore) and `/supabase/migra
 3. **Trusted Firebase -> Supabase Bridge**:
    - Supabase service-role credentials are never included in Android client code.
    - `authorizeSupabaseMedia` / `media-bridge` verify Firebase ID tokens cryptographically, check conversation membership, and return short-lived signed upload/read URLs.
-4. **Server-Enforced Video Messaging Block**:
-   - `isValidMessage()` and `isValidStory()` in `firestore.rules` explicitly reject `mediaType == 'video'` and `mimeType.matches('^video/.*')`.
-   - `media-bridge` and `authorizeSupabaseMedia` return HTTP 400 for `video/*` MIME types and video file extensions.
+4. **Cloud Media Validation**:
+   - Firestore accepts video as a chat message media type. The verified media bridge enforces conversation membership, size limits, and the `video/*` MIME type for video uploads.
+   - Stories remain image/text only. The Supabase bucket MIME allowlist remains limited to supported formats.
 5. **PII Isolation & Username Uniqueness**: Email addresses, close-friends lists, hidden story user lists, and FCM tokens live exclusively in `users/{userId}/private/account`; `usernames/{username}` requires `!exists(...)` and matching `userId == request.auth.uid`.
 6. **Conversation & Call Isolation**: Private DMs, groups, messages, and WebRTC signaling documents/ICE candidates are strictly restricted to `request.auth.uid in resource.data.memberUids` / `participantIds`.
 7. **Sender Impersonation Prevention**: Message, story, post, comment, report, and call creation enforce `senderId == request.auth.uid` / `authorId == request.auth.uid` / `callerId == request.auth.uid`.

@@ -70,6 +70,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val voiceRecorderPlayer = VoiceRecorderPlayer(context)
 
     private val auth = Firebase.auth
+    private val photoCachingIds = mutableSetOf<String>()
 
     private val _myConversations = MutableStateFlow<List<Conversation>>(emptyList())
     val myConversations: StateFlow<List<Conversation>> = _myConversations.asStateFlow()
@@ -287,6 +288,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     .collect { msgs ->
                         _remoteMessages.value = msgs
                         localRepo.cacheMessages(msgs)
+                        msgs.filter { it.mediaType == "image" }.forEach { message ->
+                            val cacheId = message.mediaId.ifBlank { message.id }
+                            if (photoCachingIds.add(cacheId)) {
+                                launch {
+                                    try {
+                                        mediaService.cachePhotoLocally(message)
+                                    } finally {
+                                        photoCachingIds.remove(cacheId)
+                                    }
+                                }
+                            }
+                        }
                         localRepo.markExpiredCloudMedia()
                         messagingRepo.markMessagesRead(conversationId, msgs)
                     }

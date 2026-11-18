@@ -197,8 +197,9 @@ service cloud.firestore {
              isOptString(data, 'mediaThumbnailUrl', 1500) &&
              isOptInt(data, 'mediaExpiresAt') &&
              isOptBool(data, 'mediaExpired') &&
-             data.mediaType in ['text', 'image', 'voice', 'document', 'poll', 'sticker'] &&
-             (!('mimeType' in data) || !(data.mimeType is string) || !data.mimeType.matches('(?i)^video/.*')) &&
+             data.mediaType in ['text', 'image', 'voice', 'document', 'video', 'poll', 'sticker'] &&
+             ((data.mediaType == 'video' && ('mimeType' in data) && data.mimeType is string && data.mimeType.matches('(?i)^video/.*')) ||
+              (data.mediaType != 'video' && (!('mimeType' in data) || !(data.mimeType is string) || !data.mimeType.matches('(?i)^video/.*')))) &&
              isOptString(data, 'fileName', 256) &&
              isOptInt(data, 'fileSizeBytes') &&
              isOptString(data, 'mimeType', 128) &&

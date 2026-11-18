@@ -201,7 +201,7 @@ class PrivacyXRepositoryRuleTest : FirestoreEmulatorTestBase() {
     }
 
     @Test
-    fun messagingRepository_videoMediaAndVideoMime_areRejected() = runBlocking {
+    fun messagingRepository_videoMessageAllowedAndMimeCategoryValidated() = runBlocking {
         val suffix = UUID.randomUUID().toString().replace("-", "").take(6)
         val aliceUid = signInTestUser("vid_alice_$suffix@test.com")
         val bobUid = signInTestUser("vid_bob_$suffix@test.com")
@@ -225,7 +225,7 @@ class PrivacyXRepositoryRuleTest : FirestoreEmulatorTestBase() {
                 mimeType = "video/mp4"
             )
         }
-        assertTrue("Video mediaType must be rejected", videoTypeRes.isFailure)
+        assertTrue("Video mediaType should be accepted", videoTypeRes.isSuccess)
 
         val videoMimeRes = withTimeout(TIMEOUT_MS) {
             msgRepo.sendMessage(
@@ -237,7 +237,7 @@ class PrivacyXRepositoryRuleTest : FirestoreEmulatorTestBase() {
                 mimeType = "video/mp4"
             )
         }
-        assertTrue("video/mp4 MIME type must be rejected", videoMimeRes.isFailure)
+        assertTrue("Video MIME type must not be disguised as a document", videoMimeRes.isFailure)
     }
 
     private companion object {

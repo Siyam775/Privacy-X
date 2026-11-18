@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.widget.MediaController
+import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -100,6 +102,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -247,6 +250,12 @@ fun ChatDetailScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) onUploadMedia(uri, "", compressUploads)
+    }
+
+    val videoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) onUploadMedia(uri, "", false)
     }
 
     val documentPicker = rememberLauncherForActivityResult(
@@ -1047,7 +1056,7 @@ fun ChatDetailScreen(
 
     // Message Action Popover
     contextMenuTarget?.let { target ->
-        val hasDownloadable = target.mediaType in setOf("image", "voice", "document") && !target.isDeleted
+        val hasDownloadable = target.mediaType in setOf("image", "voice", "document", "video") && !target.isDeleted
         MessageActionPopoverDialog(
             message = target,
             isMine = target.senderId == currentUser.userId,
@@ -1105,6 +1114,10 @@ fun ChatDetailScreen(
             onPickImage = {
                 showAttachmentSheet = false
                 mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+            onPickVideo = {
+                showAttachmentSheet = false
+                videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
             },
             onPickDocument = {
                 showAttachmentSheet = false
@@ -1548,16 +1561,19 @@ private fun MessageBubbleItem(
                             }
                         }
                         "video" -> {
-                            Surface(
-                                color = fgColor.copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Rounded.CloudOff, contentDescription = "Disabled", tint = fgColor.copy(alpha = 0.78f))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Video messaging is disabled", style = MaterialTheme.typography.bodySmall, color = fgColor)
-                                }
+                            if (resolvedMediaUri.isNotBlank()) {
+                                AndroidView(
+                                    modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(14.dp)),
+                                    factory = { context ->
+                                        VideoView(context).apply {
+                                            setMediaController(MediaController(context).also { it.setAnchorView(this) })
+                                            setVideoURI(Uri.parse(resolvedMediaUri))
+                                            setOnPreparedListener { it.start() }
+                                        }
+                                    }
+                                )
+                            } else {
+                                Text("Video unavailable", style = MaterialTheme.typography.bodySmall, color = fgColor)
                             }
                             Spacer(Modifier.height(6.dp))
                         }

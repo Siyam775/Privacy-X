@@ -6,9 +6,10 @@
   - Android client obtains a fresh Firebase ID token (`FirebaseAuth.currentUser?.getIdToken(false)`).
   - Backend bridge (`authorizeSupabaseMedia` in `/functions/src/index.ts` or `/supabase/functions/media-bridge/index.ts`) verifies the Firebase JWT, checks conversation membership in Firestore, enforces MIME/size rules, creates `media_objects` / `mediaObjects` rows with `expiresAt = now + 7 days`, and returns short-lived signed upload URLs + signed read URLs.
   - `SUPABASE_SERVICE_ROLE_KEY` is stored strictly in backend Secrets and **never** shipped inside the Android APK.
-- **Zero Video Policy in Messaging & Stories**:
-  - `SupabaseMediaService.isBannedVideo(...)`, Photo Picker `ImageOnly`, SAF MIME filtering, `firestore.rules` (`isValidMessage` / `isValidStory`), and backend bridge endpoints all reject `video/*` MIME types and video extensions (`.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.flv`, `.m4v`, `.3g2`).
-  - WebRTC live Voice & Video Calling (`CallsScreen`) remains unaffected and fully operational.
+- **Android Chat Video Storage**:
+  - Android chat videos are stored in the private `chat-media` bucket and remain cloud-only unless explicitly downloaded. Message text and uploaded photos are retained locally alongside cloud copies.
+  - Apply `supabase/migrations/20261118_video_chat_media.sql` to allow supported video MIME types in the bucket. The 25 MB upload cap and 7-day cloud expiration still apply.
+  - Stories remain image/text only. WebRTC voice and video calling remains unaffected.
 - **Image Optimization & Thumbnails**:
   - Corrects Exif rotation, scales images proportionally to max 1600px, and encodes WebP targeting low storage footprint (100–400 KB range) alongside a 320px WebP thumbnail (`_thumb.webp`).
   - Maximum upload limit validated against `platformSettings.maxUploadMb` (default 25 MB, hard cap 25 MB).

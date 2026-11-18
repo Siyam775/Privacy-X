@@ -24,13 +24,6 @@ function getDb() {
   return db;
 }
 
-function isBannedVideoType(mimeType: string, fileName: string): boolean {
-  const mime = mimeType.toLowerCase();
-  const ext = fileName.split(".").pop()?.toLowerCase() || "";
-  const videoExts = ["mp4", "mov", "avi", "mkv", "webm", "flv", "m4v", "3g2"];
-  return mime.startsWith("video/") || videoExts.includes(ext);
-}
-
 async function createSupabaseSignedUploadUrl(
   baseUrl: string,
   serviceRoleKey: string,
@@ -99,7 +92,7 @@ async function deleteSupabaseObject(
 
 /**
  * Trusted Firebase Auth -> Supabase Storage Bridge.
- * Verifies Firebase ID token, checks conversation membership/ownership, blocks all video/* MIME types,
+ * Verifies Firebase ID token, checks conversation membership/ownership,
  * issues short-lived signed upload URLs + 7-day read URLs, and records 7-day expiration metadata.
  */
 export const authorizeSupabaseMedia = onRequest(
@@ -133,8 +126,16 @@ export const authorizeSupabaseMedia = onRequest(
         const messageId = typeof req.body?.messageId === "string" ? req.body.messageId : "";
         const hasThumbnail = Boolean(req.body?.hasThumbnail);
 
-        if (isBannedVideoType(mimeType, fileName) || category === "video") {
-          res.status(400).json({ error: "Video messaging is disabled." });
+        if (!["image", "voice", "document", "video", "avatar", "story", "post"].includes(category)) {
+          res.status(400).json({ error: "Unsupported media category." });
+          return;
+        }
+        if (category === "video" && !mimeType.toLowerCase().startsWith("video/")) {
+          res.status(400).json({ error: "Video files must use a video MIME type." });
+          return;
+        }
+        if (category !== "video" && mimeType.toLowerCase().startsWith("video/")) {
+          res.status(400).json({ error: "Video MIME types must use the video category." });
           return;
         }
         if (sizeBytes < 0 || sizeBytes > 25 * 1024 * 1024) {

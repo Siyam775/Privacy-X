@@ -73,13 +73,6 @@ async function verifyConversationAccess(
   return mode === "download" && isPublic;
 }
 
-function isVideoMimeOrExt(mime: string, fileName: string): boolean {
-  const m = mime.toLowerCase();
-  const ext = fileName.split(".").pop()?.toLowerCase() || "";
-  const bannedExts = ["mp4", "mov", "avi", "mkv", "webm", "flv", "m4v", "3g2"];
-  return m.startsWith("video/") || bannedExts.includes(ext);
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -106,11 +99,14 @@ Deno.serve(async (req) => {
       const sizeBytes = Number(body.sizeBytes || 0);
       const hasThumbnail = Boolean(body.hasThumbnail);
 
-      if (isVideoMimeOrExt(mimeType, fileName) || category === "video") {
-        return Response.json({ error: "Video messaging is disabled." }, { status: 400, headers: CORS_HEADERS });
-      }
-      if (!["image", "voice", "document", "avatar", "story", "post"].includes(category)) {
+      if (!["image", "voice", "document", "video", "avatar", "story", "post"].includes(category)) {
         return Response.json({ error: "Unsupported category" }, { status: 400, headers: CORS_HEADERS });
+      }
+      if (category === "video" && !mimeType.startsWith("video/")) {
+        return Response.json({ error: "Video files must use a video MIME type." }, { status: 400, headers: CORS_HEADERS });
+      }
+      if (category !== "video" && mimeType.startsWith("video/")) {
+        return Response.json({ error: "Video MIME types must use the video category." }, { status: 400, headers: CORS_HEADERS });
       }
       if (sizeBytes < 0 || sizeBytes > 25 * 1024 * 1024) {
         return Response.json({ error: "File exceeds 25MB limit" }, { status: 400, headers: CORS_HEADERS });

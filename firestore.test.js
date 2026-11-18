@@ -406,7 +406,7 @@ test("Group adminsOnlyMessaging blocks non-admin messages and allows admin messa
   );
 });
 
-test("Video messaging and video MIME types are strictly rejected by Firestore rules", async () => {
+test("Video chat messages are accepted only with a video MIME type", async () => {
   const ts = pastTs();
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
 
@@ -423,8 +423,7 @@ test("Video messaging and video MIME types are strictly rejected by Firestore ru
     })
   );
 
-  // mediaType = "video" rejected
-  await assertFails(
+  await assertSucceeds(
     aliceDb
       .collection("conversations")
       .doc("conv_no_video")
@@ -444,7 +443,7 @@ test("Video messaging and video MIME types are strictly rejected by Firestore ru
       })
   );
 
-  // Spoofing mediaType = "document" with video/mp4 MIME rejected
+  // Video MIME cannot be disguised as a document.
   await assertFails(
     aliceDb
       .collection("conversations")

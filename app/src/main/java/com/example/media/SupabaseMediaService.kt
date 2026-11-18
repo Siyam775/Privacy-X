@@ -43,7 +43,7 @@ data class MediaValidationResult(
     val fileName: String,
     val mimeType: String,
     val sizeBytes: Long,
-    val category: String // "image" | "voice" | "document" (video disabled)
+    val category: String // "image" | "voice" | "document" | "video"
 )
 
 data class UploadedMediaResult(
@@ -77,8 +77,7 @@ class SupabaseMediaService(private val context: Context) {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private val allowedMimePrefixes = listOf("image/", "audio/")
-    private val bannedVideoExtensions = setOf("mp4", "mov", "avi", "mkv", "webm", "flv", "m4v", "3g2")
+    private val allowedMimePrefixes = listOf("image/", "audio/", "video/")
     private val allowedDocMimes = setOf(
         "application/pdf",
         "application/msword",
@@ -109,6 +108,12 @@ class SupabaseMediaService(private val context: Context) {
         "webp" to "image/webp",
         "gif" to "image/gif",
         "heic" to "image/heic",
+        "mp4" to "video/mp4",
+        "m4v" to "video/x-m4v",
+        "mov" to "video/quicktime",
+        "webm" to "video/webm",
+        "mkv" to "video/x-matroska",
+        "avi" to "video/x-msvideo",
         "pdf" to "application/pdf",
         "txt" to "text/plain",
         "zip" to "application/zip"
@@ -162,14 +167,6 @@ class SupabaseMediaService(private val context: Context) {
             ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(resolvedExt)
             ?: "application/octet-stream"
 
-        if (rawMime.startsWith("video/", ignoreCase = true) || resolvedExt in bannedVideoExtensions) {
-            return Result.failure(
-                VideoMessagingDisabledException(
-                    "Video messaging is disabled. Use photos, voice notes, documents, or WebRTC video calls."
-                )
-            )
-        }
-
         val maxBytes = maxUploadMb * 1024L * 1024L
         if (size > maxBytes) {
             return Result.failure(
@@ -186,6 +183,7 @@ class SupabaseMediaService(private val context: Context) {
         val category = when {
             rawMime.startsWith("image/") -> "image"
             rawMime.startsWith("audio/") -> "voice"
+            rawMime.startsWith("video/") -> "video"
             else -> "document"
         }
 
@@ -245,13 +243,16 @@ class SupabaseMediaService(private val context: Context) {
         }
 
         uploadRes.onSuccess { res ->
+            if (res.category != "image" && res.localFilePath.isNotBlank()) {
+                File(res.localFilePath).delete()
+            }
             localRepo.saveLocalMediaRecord(
                 LocalMediaEntity(
                     mediaId = res.mediaId,
                     messageId = "",
                     conversationId = conversationId,
                     mediaType = res.category,
-                    localFilePath = res.localFilePath,
+                    localFilePath = res.localFilePath.takeIf { res.category == "image" }.orEmpty(),
                     localThumbPath = res.localThumbPath,
                     remotePath = res.remotePath,
                     mimeType = res.mimeType,
@@ -291,7 +292,8 @@ class SupabaseMediaService(private val context: Context) {
         compressImage: Boolean
     ): Result<PreparedLocalFiles> = runCatching {
         val safeConv = conversationId.replace(Regex("[^a-zA-Z0-9_-]"), "_").ifBlank { "personal" }
-        val convDir = File(localMediaRootDir(), safeConv).apply { mkdirs() }
+        val baseDir = if (validation.category == "image") localMediaRootDir() else File(context.cacheDir, "pending_media")
+        val convDir = File(baseDir, safeConv).apply { mkdirs() }
 
         if (validation.category == "image") {
             val optimized = optimizeImageToWebP(uri, compressImage)
@@ -570,6 +572,56 @@ class SupabaseMediaService(private val context: Context) {
      * Downloads a message's media into BOTH persistent internal local storage (survives 7-day cloud wipe)
      * AND the user-visible Downloads/PrivacyX directory via scoped MediaStore (zero broad permissions).
      */
+    suspend fun cachePhotoLocally(message: ChatMessage): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(message.mediaType == "image") { "Only photos are cached automatically." }
+            val mediaId = message.mediaId.ifBlank { message.id }
+            localRepo.findLocalMedia(mediaId, message.id)?.let { existing ->
+                val file = File(existing.localFilePath)
+                if (file.exists()) return@runCatching file.absolutePath
+            }
+            val expired = message.mediaExpired || message.mediaUrl.isBlank() ||
+                (message.mediaExpiresAt > 0L && message.mediaExpiresAt <= System.currentTimeMillis())
+            check(!expired) { "Photo has expired from cloud and has no local copy." }
+
+            val safeConv = message.conversationId.replace(Regex("[^a-zA-Z0-9_-]"), "_").ifBlank { "saved" }
+            val convDir = File(localMediaRootDir(), safeConv).apply { mkdirs() }
+            val ext = message.fileName.substringAfterLast('.', "webp").lowercase().ifBlank { "webp" }
+            val dest = File(convDir, "${mediaId}.$ext")
+            val request = Request.Builder().url(message.mediaUrl).get().apply {
+                if (AppConstants.supabaseAnonKey.isNotBlank() && message.mediaUrl.contains("supabase")) {
+                    header("apikey", AppConstants.supabaseAnonKey)
+                }
+            }.build()
+            client.newCall(request).execute().use { response ->
+                check(response.isSuccessful) { "Photo download failed (HTTP ${response.code})." }
+                val body = response.body ?: error("Empty photo response.")
+                body.byteStream().use { input ->
+                    FileOutputStream(dest).use { output -> input.copyTo(output) }
+                }
+            }
+            localRepo.saveLocalMediaRecord(
+                LocalMediaEntity(
+                    mediaId = mediaId,
+                    messageId = message.id,
+                    conversationId = message.conversationId,
+                    mediaType = "image",
+                    localFilePath = dest.absolutePath,
+                    localThumbPath = "",
+                    remotePath = "",
+                    mimeType = message.mimeType.ifBlank { "image/webp" },
+                    fileName = message.fileName.ifBlank { dest.name },
+                    sizeBytes = dest.length(),
+                    createdAtMs = System.currentTimeMillis(),
+                    expiresAtMs = message.mediaExpiresAt,
+                    cloudDeleted = false,
+                    downloadedToDevice = false
+                )
+            )
+            dest.absolutePath
+        }
+    }
+
     suspend fun downloadMediaToDevice(
         message: ChatMessage,
         onProgress: (Float) -> Unit = {}
